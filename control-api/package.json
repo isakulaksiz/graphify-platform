@@ -1,0 +1,23 @@
+{
+  "name": "@graphify/control-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Arayüzün konuştuğu kontrol düzlemi: repo listeleme, indeksleme işleri, endpoint bilgisi",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "5.7"
+  },
+  "engines": { "node": ">=20" }
+}

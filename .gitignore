@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Ortam dosyaları — .env.example dışında hiçbiri depoya girmez.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+.claude/settings.local.json

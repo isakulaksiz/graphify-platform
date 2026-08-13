@@ -1,0 +1,27 @@
+{
+  "name": "@graphify/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "codebase-memory-mcp stdio sunucusunu SSE ve Streamable HTTP üzerinden yayınlayan MCP gateway",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "5.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
