@@ -88,6 +88,22 @@ export default function App() {
 
   useEffect(() => loadRepos(), [loadRepos]);
 
+  /**
+   * Graf arayüzünün durumunu indeksleme sonucu oldukça tazele.
+   *
+   * Yalnızca iş bittiğinde çekmek yetmiyor: CBM'in UI'ı sonradan açılıp
+   * kapanabiliyor, ve adımlar arasında gezinince durum bayatlıyor.
+   */
+  useEffect(() => {
+    if (!indexResult) return;
+    const refresh = (): void => {
+      void fetchCbmUi(indexResult.project).then(setCbmUi).catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 10_000);
+    return () => clearInterval(timer);
+  }, [indexResult]);
+
   /** İzleme açıkken durumu düzenli tazele — tetiklemeler arayüze yansısın. */
   useEffect(() => {
     if (!watch) return;
