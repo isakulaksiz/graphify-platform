@@ -1,7 +1,7 @@
 import type {
   AzdoStatus,
   BranchList,
-  GraphData,
+  CbmUiStatus,
   EndpointInfo,
   JobEvent,
   PrecheckResult,
@@ -48,14 +48,8 @@ export function fetchEndpoint(project: string): Promise<EndpointInfo> {
   return json(`/api/projects/${encodeURIComponent(project)}/endpoint`);
 }
 
-export function fetchGraph(
-  project: string,
-  options: { limit?: number; labels?: string[] } = {},
-): Promise<GraphData> {
-  const params = new URLSearchParams();
-  if (options.limit) params.set("limit", String(options.limit));
-  if (options.labels?.length) params.set("labels", options.labels.join(","));
-  return json(`/api/projects/${encodeURIComponent(project)}/graph?${params}`);
+export function fetchCbmUi(project: string): Promise<CbmUiStatus> {
+  return json(`/api/cbm-ui?project=${encodeURIComponent(project)}`);
 }
 
 export function recoverDaemon(): Promise<{ message: string }> {

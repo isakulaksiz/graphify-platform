@@ -84,14 +84,28 @@ remote config'e, reflog'a ve `ps` çıktısına sızardı. `GIT_TERMINAL_PROMPT=
 
 ## Graf görselleştirmesi
 
-İndeksleme bitince graf arayüzde çizilir. Veri CBM'in SQLite veritabanından
-doğrudan okunur — CLI çıktısı `--json` ile bile insan-okur metin döndürdüğü için
-ayrıştırması kırılgan olurdu.
+CBM'in kendi 3D graf arayüzü kullanılıyor — node tipi ve ilişki süzgeçleri,
+ölü kod tespiti, klasör ağacı ile birlikte. İndeksleme adımı, projeye deep-link
+veren bir düğme gösterir:
 
-Düğümler dereceye (bağlantı sayısı) göre sıralanıp kırpılır; 80/150/300/600
-arasından seçilebilir. En bağlantılı düğümler mimarinin omurgasıdır, bu yüzden
-kırpma onları korur. Yerleşim elle yazılmış bir force-directed algoritma —
-ek bağımlılık yok, deterministik (aynı graf hep aynı görünür).
+```
+http://localhost:9749/?tab=graph&project=<proje-adi>
+```
+
+**Neden gömülemiyor:** CBM `Content-Security-Policy: … frame-ancestors 'none'`
+gönderiyor. Bu iframe'lemeyi kesin olarak engeller; istemci tarafında aşılamaz.
+Bu yüzden yeni sekmede açılıyor.
+
+**Ayrı süreç yönetmeye gerek yok.** `--ui=true` kalıcı bir ayardır (`config list`
+çıktısında görünmez ama etkilidir). Bir kez çalıştırıldıktan sonra, gateway MCP
+oturumu açtığında başlayan daemon UI'ı da ayağa kaldırır:
+
+```bash
+codebase-memory-mcp --ui=true --port=9749   # bir kez; ayar kalıcı
+```
+
+`/api/cbm-ui?project=<ad>` ucu arayüzün ayakta olup olmadığını bildirir; kapalıysa
+düğme devre dışı kalır ve yukarıdaki komut gösterilir.
 
 ## Otomatik graf güncelleme
 

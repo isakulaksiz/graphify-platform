@@ -9,7 +9,6 @@ import {
   setCredentials,
 } from "./azdo.js";
 import { clonePathFor, localBranches, prepareRepo } from "./clone.js";
-import { readGraph } from "./graph.js";
 import { listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
@@ -17,6 +16,8 @@ import { getWatch, listWatches, notifyPush, startWatch, stopWatch } from "./watc
 
 const PORT = Number(process.env.PORT ?? 8090);
 const GATEWAY_BASE = process.env.GATEWAY_BASE_URL ?? "http://localhost:8099";
+/** CBM'in 3D graf arayüzü. */
+const CBM_UI_URL = (process.env.CBM_UI_URL ?? "http://localhost:9749").replace(/\/$/, "");
 /** Yerel repoların aranacağı kök dizinler (virgülle ayrılmış). */
 const LOCAL_ROOTS = (process.env.LOCAL_REPO_ROOTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -139,22 +140,33 @@ app.get("/api/repos/:id/branches", async (req: Request, res: Response) => {
   }
 });
 
-/** Bir projenin grafını döndürür — arayüzdeki görselleştirme bunu kullanır. */
-app.get("/api/projects/:name/graph", (req: Request, res: Response) => {
-  const project = String(req.params.name);
-  const csv = (value: unknown): string[] =>
-    typeof value === "string" ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
+/**
+ * CBM'in kendi 3D graf arayüzünün durumu.
+ *
+ * Arayüzü iframe'e gömemiyoruz: CBM `frame-ancestors 'none'` CSP başlığı
+ * gönderiyor. Bu yüzden yeni sekmede açıyoruz.
+ *
+ * Ayrı bir süreç yönetmemize gerek yok — `--ui=true` kalıcı bir ayar olduğu
+ * için, gateway MCP oturumu açtığında başlayan daemon UI'ı da ayağa kaldırıyor.
+ */
+app.get("/api/cbm-ui", async (req: Request, res: Response) => {
+  const project = typeof req.query.project === "string" ? req.query.project : "";
+  const deepLink = project
+    ? `${CBM_UI_URL}/?tab=graph&project=${encodeURIComponent(project)}`
+    : CBM_UI_URL;
 
   try {
-    res.json(
-      readGraph(project, {
-        labels: csv(req.query.labels),
-        edgeTypes: csv(req.query.edgeTypes),
-        limit: req.query.limit ? Number(req.query.limit) : undefined,
-      }),
-    );
-  } catch (error) {
-    res.status(404).json({ error: String(error instanceof Error ? error.message : error) });
+    const probe = await fetch(`${CBM_UI_URL}/`, { signal: AbortSignal.timeout(2500) });
+    res.json({ available: probe.ok, url: deepLink, baseUrl: CBM_UI_URL });
+  } catch {
+    res.json({
+      available: false,
+      url: deepLink,
+      baseUrl: CBM_UI_URL,
+      reason:
+        "CBM graf arayüzü yanıt vermiyor. Bir kez `codebase-memory-mcp --ui=true` " +
+        "çalıştırın; ayar kalıcıdır ve sonraki oturumlarda daemon tarafından otomatik açılır.",
+    });
   }
 });
 

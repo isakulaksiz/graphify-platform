@@ -1,29 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { GraphView } from "../components/GraphView";
-import { Button, Callout, Panel, Stat } from "../components/ui";
-import type { GraphData, IndexResult, JobState } from "../types";
+import { Callout, Panel, Stat } from "../components/ui";
+import type { CbmUiStatus, IndexResult, JobState } from "../types";
 
 export function IndexStep({
   state,
   logs,
   result,
-  graph,
-  graphLoading,
-  graphError,
-  onLoadGraph,
+  cbmUi,
   footer,
 }: {
   state: JobState | null;
   logs: string[];
   result: IndexResult | null;
-  graph: GraphData | null;
-  graphLoading: boolean;
-  graphError: string | null;
-  onLoadGraph: (limit: number) => void;
+  cbmUi: CbmUiStatus | null;
   footer: React.ReactNode;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
-  const [limit, setLimit] = useState(150);
   const [logsOpen, setLogsOpen] = useState(false);
 
   // Yeni satır geldikçe otomatik aşağı kaydır.
@@ -65,39 +57,42 @@ export function IndexStep({
           </Callout>
         )}
 
-        {state === "succeeded" && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Kod grafı</p>
-              <div className="flex items-center gap-2">
-                <select
-                  value={limit}
-                  onChange={(event) => setLimit(Number(event.target.value))}
-                  className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-canvas)] px-2 py-1 text-xs text-gray-300 outline-none"
-                >
-                  <option value={80}>en bağlantılı 80 düğüm</option>
-                  <option value={150}>en bağlantılı 150 düğüm</option>
-                  <option value={300}>en bağlantılı 300 düğüm</option>
-                  <option value={600}>en bağlantılı 600 düğüm</option>
-                </select>
-                <Button variant="ghost" onClick={() => onLoadGraph(limit)} disabled={graphLoading}>
-                  {graphLoading ? "yükleniyor…" : graph ? "yenile" : "grafı göster"}
-                </Button>
+        {state === "succeeded" && cbmUi && (
+          <div className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel-soft)] px-4 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-100">Kod grafını incele</p>
+                <p className="mt-1 text-xs text-gray-400">
+                  codebase-memory-mcp'nin 3D graf arayüzü — node tipi ve ilişki süzgeçleri,
+                  ölü kod tespiti, klasör ağacı.
+                </p>
               </div>
+              {cbmUi.available ? (
+                <a
+                  href={cbmUi.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-gray-950 hover:bg-orange-400"
+                >
+                  Grafı aç ↗
+                </a>
+              ) : (
+                <span className="shrink-0 rounded-lg border border-[var(--color-edge)] px-4 py-2 text-sm text-gray-500">
+                  arayüz kapalı
+                </span>
+              )}
             </div>
 
-            {graphError && <Callout tone="error" title="Graf okunamadı">{graphError}</Callout>}
-
-            {graph && (
-              <>
-                <GraphView data={graph} />
-                <p className="text-xs text-gray-500">
-                  {graph.nodes.length} düğüm ve {graph.edges.length} kenar gösteriliyor
-                  {graph.truncated > 0 && ` · ${graph.truncated} düğüm kırpıldı`}. Düğüm boyutu
-                  bağlantı sayısını gösterir; en bağlantılı düğümler mimarinin omurgasıdır.
-                </p>
-              </>
+            {!cbmUi.available && cbmUi.reason && (
+              <p className="mt-3 border-t border-[var(--color-edge)] pt-3 text-xs text-amber-300/80">
+                {cbmUi.reason}
+              </p>
             )}
+
+            <p className="mt-3 border-t border-[var(--color-edge)] pt-3 text-xs text-gray-500">
+              Yeni sekmede açılır — CBM <code>frame-ancestors &apos;none&apos;</code> CSP
+              başlığı gönderdiği için arayüze gömülemiyor.
+            </p>
           </div>
         )}
 
