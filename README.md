@@ -5,6 +5,17 @@
 Repo kod grafını `codebase-memory-mcp` ile çıkarıp Copilot / Codex / Claude Code'a
 MCP endpoint'i olarak sunan iç platform.
 
+## Ekran görüntüleri
+
+**İndeksleme** — canlı ilerleme, node/edge sayaçları, indekslenmeyen dizin uyarısı
+ve CBM'in 3D graf arayüzüne bağlantı.
+
+![İndeksleme adımı](docs/screenshot-indexing.png)
+
+**Endpoint** — üretilen MCP adresleri ve dört istemci için hazır yapılandırma.
+
+![Endpoint adımı](docs/screenshot-endpoint.png)
+
 ## Bileşenler
 
 | Dizin | Ne yapar | Port |

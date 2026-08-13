@@ -5,6 +5,17 @@
 Internal platform that extracts a repository's code graph with `codebase-memory-mcp`
 and serves it to Copilot / Codex / Claude Code as an MCP endpoint.
 
+## Screenshots
+
+**Indexing** — live progress, node/edge counters, excluded-directory warning, and a
+link to CBM's 3D graph UI.
+
+![Indexing step](docs/screenshot-indexing.png)
+
+**Endpoint** — the generated MCP addresses and ready-to-paste config for four clients.
+
+![Endpoint step](docs/screenshot-endpoint.png)
+
 ## Components
 
 | Directory | What it does | Port |
