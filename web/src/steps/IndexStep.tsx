@@ -89,10 +89,26 @@ export function IndexStep({
               </p>
             )}
 
-            <p className="mt-3 border-t border-[var(--color-edge)] pt-3 text-xs text-gray-500">
-              Yeni sekmede açılır — CBM <code>frame-ancestors &apos;none&apos;</code> CSP
-              başlığı gönderdiği için arayüze gömülemiyor.
-            </p>
+            <div className="mt-3 border-t border-[var(--color-edge)] pt-3">
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded bg-[var(--color-canvas)] px-2 py-1.5 font-mono text-[11px] text-gray-400">
+                  {cbmUi.url}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(cbmUi.url)}
+                  className="shrink-0 rounded px-2 py-1 text-xs text-gray-400 hover:bg-[var(--color-canvas)] hover:text-gray-200"
+                >
+                  kopyala
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Yeni sekmede açılır — CBM <code>frame-ancestors &apos;none&apos;</code> CSP
+                başlığı gönderdiği için arayüze gömülemiyor. Gömülü bir tarayıcı panelinde
+                çalışıyorsanız adresi kopyalayıp kendi tarayıcınızda açın; panelde geri dönmek
+                zor olabiliyor.
+              </p>
+            </div>
           </div>
         )}
 
