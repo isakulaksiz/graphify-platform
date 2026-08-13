@@ -7,7 +7,6 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { authorize, loadTokens, type Principal } from "./auth.js";
 import { CbmUpstream } from "./cbm/upstream.js";
 import { loadConfig } from "./config.js";
-import { infoPage, wantsHtml } from "./info-page.js";
 import { createScopedServer } from "./mcp/server-factory.js";
 
 const config = loadConfig();
@@ -68,20 +67,6 @@ app.get("/healthz", (_req: Request, res: Response) => {
  */
 function param(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
-}
-
-/**
- * Tarayıcıdan gelen isteklere bilgi sayfası döndürür.
- *
- * MCP uçları gezilebilir sayfa değil; adresi tarayıcıya yapıştıran kişinin
- * ham bir 404 yerine ne yapması gerektiğini görmesi lazım. MCP istemcileri
- * `text/html` istemediği için protokol davranışı bundan etkilenmez.
- */
-function serveInfoPageIfBrowser(req: Request, res: Response, project: string): boolean {
-  if (!wantsHtml(req)) return false;
-  const baseUrl = `${req.protocol}://${req.get("host") ?? `localhost:${config.port}`}`;
-  res.type("html").send(infoPage({ project, baseUrl, authMode: config.authMode }));
-  return true;
 }
 
 /**
@@ -171,7 +156,6 @@ app.post("/mcp/:project", async (req: Request, res: Response) => {
 /** Sunucudan istemciye giden bağımsız SSE akışı (bildirimler için). */
 app.get("/mcp/:project", async (req: Request, res: Response) => {
   const project = param(req.params.project);
-  if (serveInfoPageIfBrowser(req, res, project)) return;
   if (!requireAuth(req, res, project)) return;
 
   const sessionId = req.header("mcp-session-id");
@@ -181,7 +165,7 @@ app.get("/mcp/:project", async (req: Request, res: Response) => {
       error: "Oturum bulunamadı.",
       hint:
         "Bu uç, açık bir MCP oturumunun bildirim akışıdır ve 'mcp-session-id' başlığı ister. " +
-        "Önce POST ile 'initialize' gönderin. Yapılandırma için adresi tarayıcıda açın.",
+        "Giriş noktası POST + 'initialize'dır.",
     });
     return;
   }
@@ -207,17 +191,9 @@ app.delete("/mcp/:project", async (req: Request, res: Response) => {
 // SSE transport (eski protokol)  —  Streamable HTTP desteklemeyen istemciler için
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * SSE akışı.
- *
- * Bilgi sayfası burada BİLEREK gösterilmiyor: bu uç tarayıcıda gerçekten
- * çalışan, gözlemlenebilir bir akış. Adresi tarayıcıda açan kişi ham olayları
- * görmeli — bağlantının canlı olduğunu doğrulamanın en pratik yolu bu.
- * Yapılandırma bilgisi için `?info=1` eklenebilir.
- */
+/** SSE akışı. */
 app.get("/mcp/:project/sse", async (req: Request, res: Response) => {
   const project = param(req.params.project);
-  if (req.query.info !== undefined && serveInfoPageIfBrowser(req, res, project)) return;
   const principal = requireAuth(req, res, project);
   if (!principal) return;
 
@@ -232,9 +208,13 @@ app.get("/mcp/:project/sse", async (req: Request, res: Response) => {
    * zaman aşımıyla sessizce düşer ve istemci bunu fark etmez. ':' ile başlayan
    * satır SSE yorumudur: istemciler yok sayar, bağlantı canlı kalır.
    */
-  const keepAlive = setInterval(() => {
+  const ping = (): void => {
     if (!res.writableEnded) res.write(`: ping ${new Date().toISOString()}\n\n`);
-  }, SSE_KEEP_ALIVE_MS);
+  };
+  // İlk ping'i hemen gönder: akışın canlı olduğu ilk saniyede görünsün,
+  // 15 sn beklemek gerekmesin.
+  setTimeout(ping, 50);
+  const keepAlive = setInterval(ping, SSE_KEEP_ALIVE_MS);
   keepAlive.unref();
   res.on("close", () => clearInterval(keepAlive));
 
