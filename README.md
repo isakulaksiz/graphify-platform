@@ -62,6 +62,7 @@ engellidir.
 2. **Kapsam** — dal seçimi (aranabilir açılır liste, repodan canlı çekilir)
 3. **Ön kontrol** — kaynak kodu getirir (klonlar/günceller) ve doğrular
 4. **İndeksleme** — SSE ile canlı log, node/edge sayaçları, indekslenmeyen dizin uyarısı
+   ve **kod grafı görselleştirmesi**
 5. **Otomasyon** — otomatik güncelleme anahtarı + webhook aboneliği
 6. **Endpoint** — MCP URL'leri + 4 istemci için hazır yapılandırma
 
@@ -80,6 +81,17 @@ Klonlar `CLONE_ROOT` altında tutulur (varsayılan `~/.cache/graphify/repos`), d
 PAT git'e **header ile** geçirilir (`http.extraHeader`), URL'ye gömülmez — gömülseydi
 remote config'e, reflog'a ve `ps` çıktısına sızardı. `GIT_TERMINAL_PROMPT=0` ve
 `stdio: ignore` ile kimlik istemi çıkması hâlinde asılmak yerine hata verilir.
+
+## Graf görselleştirmesi
+
+İndeksleme bitince graf arayüzde çizilir. Veri CBM'in SQLite veritabanından
+doğrudan okunur — CLI çıktısı `--json` ile bile insan-okur metin döndürdüğü için
+ayrıştırması kırılgan olurdu.
+
+Düğümler dereceye (bağlantı sayısı) göre sıralanıp kırpılır; 80/150/300/600
+arasından seçilebilir. En bağlantılı düğümler mimarinin omurgasıdır, bu yüzden
+kırpma onları korur. Yerleşim elle yazılmış bir force-directed algoritma —
+ek bağımlılık yok, deterministik (aynı graf hep aynı görünür).
 
 ## Otomatik graf güncelleme
 

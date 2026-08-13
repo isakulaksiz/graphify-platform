@@ -48,6 +48,30 @@ export interface BranchList {
   defaultBranch: string;
 }
 
+export interface GraphNode {
+  id: number;
+  label: string;
+  name: string;
+  filePath: string;
+  degree: number;
+}
+
+export interface GraphEdge {
+  source: number;
+  target: number;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  truncated: number;
+  totalNodes: number;
+  totalEdges: number;
+  availableLabels: string[];
+  availableEdgeTypes: string[];
+}
+
 export type JobState = "queued" | "running" | "succeeded" | "failed";
 
 export interface IndexResult {

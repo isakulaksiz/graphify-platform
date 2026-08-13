@@ -9,6 +9,7 @@ import {
   setCredentials,
 } from "./azdo.js";
 import { clonePathFor, localBranches, prepareRepo } from "./clone.js";
+import { readGraph } from "./graph.js";
 import { listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
@@ -135,6 +136,25 @@ app.get("/api/repos/:id/branches", async (req: Request, res: Response) => {
     res.json({ branches, defaultBranch: repo.defaultBranch });
   } catch (error) {
     res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/** Bir projenin grafını döndürür — arayüzdeki görselleştirme bunu kullanır. */
+app.get("/api/projects/:name/graph", (req: Request, res: Response) => {
+  const project = String(req.params.name);
+  const csv = (value: unknown): string[] =>
+    typeof value === "string" ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  try {
+    res.json(
+      readGraph(project, {
+        labels: csv(req.query.labels),
+        edgeTypes: csv(req.query.edgeTypes),
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      }),
+    );
+  } catch (error) {
+    res.status(404).json({ error: String(error instanceof Error ? error.message : error) });
   }
 });
 

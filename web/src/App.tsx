@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   fetchBranches,
   fetchEndpoint,
+  fetchGraph,
   fetchRepos,
   fetchWatchState,
   prepareRepo,
@@ -29,6 +30,7 @@ import type {
   StepDefinition,
   StepStatus,
   WatchState,
+  GraphData,
 } from "./types";
 
 const STEPS: StepDefinition[] = [
@@ -66,6 +68,10 @@ export default function App() {
   const [indexResult, setIndexResult] = useState<IndexResult | null>(null);
 
   const [endpoint, setEndpoint] = useState<EndpointInfo | null>(null);
+
+  const [graph, setGraph] = useState<GraphData | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState<string | null>(null);
 
   const [watch, setWatch] = useState<WatchState | null>(null);
   const [watchBusy, setWatchBusy] = useState(false);
@@ -152,6 +158,7 @@ export default function App() {
     setJobState(null);
     setLogs([]);
     setIndexResult(null);
+    setGraph(null);
     setEndpoint(null);
     setWatch(null);
     setWatchError(null);
@@ -200,6 +207,8 @@ export default function App() {
     setCurrent("index");
     setLogs([]);
     setIndexResult(null);
+    setGraph(null);
+    setGraphError(null);
     setJobState("queued");
 
     try {
@@ -223,6 +232,22 @@ export default function App() {
       setJobState("failed");
     }
   }, [repo, repoPath]);
+
+  const loadGraph = useCallback(
+    async (limit: number): Promise<void> => {
+      if (!indexResult) return;
+      setGraphLoading(true);
+      setGraphError(null);
+      try {
+        setGraph(await fetchGraph(indexResult.project, { limit }));
+      } catch (error) {
+        setGraphError(String(error));
+      } finally {
+        setGraphLoading(false);
+      }
+    },
+    [indexResult],
+  );
 
   const navButtons = (
     back: string | null,
@@ -317,6 +342,10 @@ export default function App() {
               state={jobState}
               logs={logs}
               result={indexResult}
+              graph={graph}
+              graphLoading={graphLoading}
+              graphError={graphError}
+              onLoadGraph={(limit) => void loadGraph(limit)}
               footer={
                 <>
                   {jobState === "failed" && (

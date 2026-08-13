@@ -24,6 +24,9 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
+/** SSE keep-alive aralığı — SDK'nın Streamable HTTP tarafındaki varsayılanla aynı. */
+const SSE_KEEP_ALIVE_MS = Number(process.env.SSE_KEEP_ALIVE_MS ?? 15_000);
+
 function touch(sessionId: string): void {
   const session = sessions.get(sessionId);
   if (session) session.lastSeen = Date.now();
@@ -204,14 +207,36 @@ app.delete("/mcp/:project", async (req: Request, res: Response) => {
 // SSE transport (eski protokol)  —  Streamable HTTP desteklemeyen istemciler için
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * SSE akışı.
+ *
+ * Bilgi sayfası burada BİLEREK gösterilmiyor: bu uç tarayıcıda gerçekten
+ * çalışan, gözlemlenebilir bir akış. Adresi tarayıcıda açan kişi ham olayları
+ * görmeli — bağlantının canlı olduğunu doğrulamanın en pratik yolu bu.
+ * Yapılandırma bilgisi için `?info=1` eklenebilir.
+ */
 app.get("/mcp/:project/sse", async (req: Request, res: Response) => {
   const project = param(req.params.project);
-  if (serveInfoPageIfBrowser(req, res, project)) return;
+  if (req.query.info !== undefined && serveInfoPageIfBrowser(req, res, project)) return;
   const principal = requireAuth(req, res, project);
   if (!principal) return;
 
   const transport = new SSEServerTransport(`/mcp/${project}/messages`, res);
   const server = createScopedServer(upstream, project, principal);
+
+  /**
+   * Keep-alive ping'leri.
+   *
+   * SDK'nın eski SSEServerTransport'u — Streamable HTTP'nin aksine — keep-alive
+   * göndermiyor. Ping'siz akış, araya giren proxy/load balancer'ın idle
+   * zaman aşımıyla sessizce düşer ve istemci bunu fark etmez. ':' ile başlayan
+   * satır SSE yorumudur: istemciler yok sayar, bağlantı canlı kalır.
+   */
+  const keepAlive = setInterval(() => {
+    if (!res.writableEnded) res.write(`: ping ${new Date().toISOString()}\n\n`);
+  }, SSE_KEEP_ALIVE_MS);
+  keepAlive.unref();
+  res.on("close", () => clearInterval(keepAlive));
 
   sessions.set(transport.sessionId, {
     server,
