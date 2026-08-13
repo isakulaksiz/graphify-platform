@@ -123,3 +123,15 @@ transport'ta çalışıyor; `project` ezme, `list_projects` süzme, engelli ara�
 
 **Yapılmadı:** kalıcılık yok (oturumlar bellekte), token deposu ortam değişkeninde
 (Faz 5'te Entra ID + Azure DevOps repo yetkilerine bağlanacak), otomatik test yok.
+
+## Tarayıcıda açıldığında
+
+MCP uçları gezilebilir sayfa değildir — JSON-RPC konuşurlar. Adres tarayıcıya
+yapıştırıldığında ham bir 404 yerine yapılandırma bilgisi gösterilir.
+
+Ayrım `Accept` başlığıyla yapılır: tarayıcılar `text/html` ister, MCP istemcileri
+`application/json, text/event-stream`. Protokol davranışı bundan etkilenmez.
+
+`GET /mcp/:project` bir MCP istemcisinden `mcp-session-id` başlığı olmadan gelirse
+404 döner — bu uç, açık bir oturumun bildirim akışıdır, giriş noktası değil. Giriş
+her zaman `POST` + `initialize`'dır.
