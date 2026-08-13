@@ -203,3 +203,15 @@ Otomatik güncelleme ayrı bir test reposuyla doğrulandı:
 **Yapılmadı:** service hook aboneliğinin arayüzden otomatik kurulması, kalıcı iş/izleme
 kaydı ve PAT saklama (süreç yeniden başlarsa sıfırlanır), Entra ID entegrasyonu,
 otomatik test.
+
+## Endpoint'i test etme
+
+MCP uçları **tarayıcıda test edilemez**: tarayıcı `GET` yapar, MCP ise
+`POST` + JSON-RPC ile başlar. Aynı adres, farklı istek — farklı sonuç.
+
+```bash
+./test-endpoint.sh http://localhost:8099/mcp/<proje-adi>
+```
+
+Her iki transport'u da uçtan uca dener: oturum açma, `tools/list`, araç çağrısı,
+SSE keep-alive ping'i ve mesaj kanalı.
