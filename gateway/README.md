@@ -1,5 +1,7 @@
 # graphify-gateway
 
+**Türkçe** · [English](README.en.md)
+
 `codebase-memory-mcp`'nin stdio-only MCP sunucusunu **SSE** ve **Streamable HTTP**
 üzerinden yayınlayan, proje bazlı yetkilendirme yapan gateway.
 
@@ -114,6 +116,17 @@ SSE isteyen eski istemciler için aynı adresin `/sse` sonekli hali:
 `"headers": { "Authorization": "Bearer <token>" }` eklenir. Arayüzün Endpoint adımı
 gateway'in `/healthz` ucundan modu okuyup snippet'i buna göre üretir — elle
 düzeltmeniz gerekmez.
+
+## SSE keep-alive
+
+SDK'nın eski `SSEServerTransport`'u — Streamable HTTP'nin aksine — keep-alive
+göndermiyor. Ping'siz akış, araya giren proxy'nin idle zaman aşımıyla sessizce
+düşer. Gateway bağlantı kurulur kurulmaz bir SSE yorum satırı gönderiyor, sonra
+`SSE_KEEP_ALIVE_MS` (varsayılan 15000) aralığıyla tekrarlıyor:
+
+```
+: ping 2026-08-13T19:21:52.708Z
+```
 
 ## Doğrulanan durum
 

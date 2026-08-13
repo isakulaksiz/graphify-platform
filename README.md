@@ -1,5 +1,7 @@
 # graphify-platform
 
+**Türkçe** · [English](README.en.md)
+
 Repo kod grafını `codebase-memory-mcp` ile çıkarıp Copilot / Codex / Claude Code'a
 MCP endpoint'i olarak sunan iç platform.
 
@@ -195,10 +197,8 @@ Otomatik güncelleme ayrı bir test reposuyla doğrulandı:
 | Klonlama — ilk çağrı | `cloned`, `main` @ fe80d0fb |
 | Klonlama — farklı dal, ikinci çağrı | `updated`, `feature/yeni-ozellik` @ 3eba1c69, aynı dizin |
 | Yerel repo dal listesi + hazırlama | `master`, klonlama atlandı, `ready: true` |
-
-> Azure DevOps üzerinden dal listeleme ve klonlama **canlı repoyla henüz denenmedi** —
-> control-api yeniden başlatıldığında PAT bellekten silindiği için. Klonlama mantığı
-> sentetik bir uzak repoyla doğrulandı.
+| Azure DevOps — canlı repo (GRAPHIFY) | Klonlandı, 2 dal listelendi, indekslendi (293/662) |
+| Endpoint testi — her iki transport | `test-endpoint.sh` ile 7 kontrolün tamamı geçti |
 
 **Yapılmadı:** service hook aboneliğinin arayüzden otomatik kurulması, kalıcı iş/izleme
 kaydı ve PAT saklama (süreç yeniden başlarsa sıfırlanır), Entra ID entegrasyonu,
