@@ -80,7 +80,8 @@ else
   grep -q 'serverInfo' "$STREAM" && ok "yanıt akıştan geldi" || fail "yanıt akışa düşmedi"
 fi
 
-kill  2>/dev/null; wait  2>/dev/null
+kill "$CURL_PID" 2>/dev/null
+wait "$CURL_PID" 2>/dev/null
 rm -f "$STREAM"
 
 echo
