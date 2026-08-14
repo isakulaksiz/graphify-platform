@@ -58,6 +58,29 @@ MCP oturumu açıkken diğeri CLI komutu çalıştırabiliyor.
 > CBM'in proje bazlı kilitleri üzerinden yarışırlar. Ölçekleme gerekiyorsa repoları
 > ayrı compose grupları/namespace'lere bölün.
 
+### Docker'da çözülen üç sorun
+
+Bunlar kurulum sırasında ortaya çıktı; hepsi `Dockerfile` / `docker-compose.yml`
+içinde çözüldü ama neden öyle yazıldığını bilmekte fayda var.
+
+**1. CBM cache dizini 0700 olmak zorunda.** Konteynerde alışılmış `chmod 777`
+refleksi CBM'i tamamen durduruyor:
+`secure CLI coordination could not be created (cache-private)`.
+
+**2. Graf arayüzü yalnızca 127.0.0.1'e bağlanıyor.** Bind adresi seçeneği yok,
+bu yüzden Docker port yönlendirmesi tek başına yetmiyor — araya `socat` köprüsü
+konuldu (konteynerde 9750 → 127.0.0.1:9749).
+
+**3. Arayüzü sunan daemon, son istemci ayrılınca kapanıyor.**
+`daemon.runtime_stopping reason=last_committed_client_disconnected`. Tek seferlik
+`--ui=true` komutu çıkınca UI de gidiyordu. Çözüm: stdin'i açık tutulmuş kalıcı
+bir MCP oturumu (`sleep infinity | codebase-memory-mcp`).
+
+**Ayrıca:** konteyner içi ve dışı adresler ayrıldı. `control-api` için `localhost`
+kendi konteyneri olduğundan gateway'i `http://gateway:8099` ile yokluyor.
+Bu ayrım yapılmadan snippet'ler yanlış üretiliyordu — token gerekmiyorken
+`Authorization` başlığı ekleniyordu.
+
 ### Şirket içi Azure DevOps (on-prem)
 
 Adres yapısı bulut ile aynı şekle sahip, sadece taban adres ve koleksiyon değişiyor:

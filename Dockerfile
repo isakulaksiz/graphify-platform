@@ -8,9 +8,10 @@ FROM node:22-slim AS base
 
 # git: control-api repoları klonlar/fetch eder
 # procps: daemon kurtarma için pkill
+# socat: CBM graf arayüzü yalnızca 127.0.0.1'e bağlanıyor; dışarı açmak için köprü
 # ca-certificates: Azure DevOps'a HTTPS
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates procps \
+      git ca-certificates procps socat \
  && rm -rf /var/lib/apt/lists/*
 
 ARG CBM_VERSION=0.10.3

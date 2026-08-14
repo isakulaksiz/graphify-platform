@@ -26,6 +26,9 @@ const sessions = new Map<string, Session>();
 /** SSE keep-alive aralığı — SDK'nın Streamable HTTP tarafındaki varsayılanla aynı. */
 const SSE_KEEP_ALIVE_MS = Number(process.env.SSE_KEEP_ALIVE_MS ?? 15_000);
 
+/** CBM'in graf arayüzünün dinlediği port (aynı makinede, loopback). */
+const CBM_UI_PORT = Number(process.env.CBM_UI_PORT ?? 9749);
+
 function touch(sessionId: string): void {
   const session = sessions.get(sessionId);
   if (session) session.lastSeen = Date.now();
@@ -53,10 +56,34 @@ setInterval(() => {
 const app = express();
 app.use(express.json({ limit: "4mb" }));
 
-app.get("/healthz", (_req: Request, res: Response) => {
-  // authMode'u yayınlıyoruz ki control-api istemci yapılandırmalarını
-  // doğru üretebilsin (token'sız modda Authorization header'ı basmasın).
-  res.json({ status: "ok", sessions: sessions.size, authMode: config.authMode });
+/**
+ * CBM graf arayüzü ayakta mı.
+ *
+ * Bu yoklamayı gateway yapıyor çünkü CBM'in UI'ı Host başlığını denetliyor:
+ * başka bir konteynerden `gateway:9750` diye gelen istek 403 alıyor.
+ * Kendi loopback'inden sorulduğunda sorun yok.
+ */
+async function cbmUiAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${CBM_UI_PORT}/`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+app.get("/healthz", async (_req: Request, res: Response) => {
+  // authMode ve UI durumunu yayınlıyoruz ki control-api istemci
+  // yapılandırmalarını doğru üretebilsin ve grafı açma düğmesini
+  // doğru durumda gösterebilsin.
+  res.json({
+    status: "ok",
+    sessions: sessions.size,
+    authMode: config.authMode,
+    cbmUi: { available: await cbmUiAvailable(), port: CBM_UI_PORT },
+  });
 });
 
 /**

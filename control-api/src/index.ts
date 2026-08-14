@@ -15,7 +15,22 @@ import type { EndpointInfo, RepoSummary } from "./types.js";
 import { getWatch, listWatches, notifyPush, startWatch, stopWatch } from "./watcher.js";
 
 const PORT = Number(process.env.PORT ?? 8090);
+/**
+ * Adresler ikiye ayrılır — konteynerde ikisi aynı olamaz.
+ *
+ * PUBLIC : kullanıcının tarayıcısından erişilebilen adres. Arayüzde gösterilir,
+ *          istemci yapılandırmalarına yazılır.
+ * INTERNAL: bu servisin kendi ağından erişebildiği adres. Sağlık kontrolü ve
+ *          yoklama için kullanılır.
+ *
+ * Docker'da control-api için `localhost` kendi konteyneridir; gateway'e
+ * `http://gateway:8099` ile ulaşır. Bu ayrım yapılmazsa yoklamalar sessizce
+ * başarısız olur ve arayüz yanlış bilgi gösterir (ör. token gerekmiyorken
+ * gerekiyormuş gibi).
+ */
 const GATEWAY_BASE = process.env.GATEWAY_BASE_URL ?? "http://localhost:8099";
+const GATEWAY_INTERNAL = (process.env.GATEWAY_INTERNAL_URL ?? GATEWAY_BASE).replace(/\/$/, "");
+
 /** CBM'in 3D graf arayüzü. */
 const CBM_UI_URL = (process.env.CBM_UI_URL ?? "http://localhost:9749").replace(/\/$/, "");
 /** Yerel repoların aranacağı kök dizinler (virgülle ayrılmış). */
@@ -156,19 +171,21 @@ app.get("/api/cbm-ui", async (req: Request, res: Response) => {
     ? `${CBM_UI_URL}/?tab=graph&project=${encodeURIComponent(project)}`
     : CBM_UI_URL;
 
-  try {
-    const probe = await fetch(`${CBM_UI_URL}/`, { signal: AbortSignal.timeout(2500) });
-    res.json({ available: probe.ok, url: deepLink, baseUrl: CBM_UI_URL });
-  } catch {
-    res.json({
-      available: false,
-      url: deepLink,
-      baseUrl: CBM_UI_URL,
-      reason:
-        "CBM graf arayüzü yanıt vermiyor. Bir kez `codebase-memory-mcp --ui=true` " +
-        "çalıştırın; ayar kalıcıdır ve sonraki oturumlarda daemon tarafından otomatik açılır.",
-    });
-  }
+  const health = await gatewayHealth();
+  const available = health?.cbmUi?.available === true;
+
+  res.json({
+    available,
+    url: deepLink,
+    baseUrl: CBM_UI_URL,
+    ...(available
+      ? {}
+      : {
+          reason:
+            "CBM graf arayüzü yanıt vermiyor. Arayüz, gateway bir MCP oturumu " +
+            "açtığında daemon tarafından başlatılır — henüz hiç bağlantı olmadıysa kapalıdır.",
+        }),
+  });
 });
 
 app.get("/api/projects", async (_req: Request, res: Response) => {
@@ -283,20 +300,32 @@ app.get("/api/jobs/:id/events", (req: Request, res: Response) => {
   });
 });
 
-/** Gateway'in kimlik doğrulama modunu sorar; ulaşılamazsa güvenli tarafta kalır. */
-async function gatewayAuthMode(): Promise<"none" | "bearer"> {
+interface GatewayHealth {
+  authMode?: string;
+  cbmUi?: { available?: boolean };
+}
+
+/**
+ * Gateway'in sağlık bilgisini okur — kimlik modu ve CBM arayüz durumu.
+ *
+ * UI yoklamasını gateway yapıyor: CBM'in arayüzü Host başlığını denetlediği
+ * için başka konteynerden doğrudan sorulduğunda 403 dönüyor.
+ */
+async function gatewayHealth(): Promise<GatewayHealth | null> {
   try {
-    const response = await fetch(`${GATEWAY_BASE}/healthz`, {
+    const response = await fetch(`${GATEWAY_INTERNAL}/healthz`, {
       signal: AbortSignal.timeout(3000),
     });
-    if (!response.ok) return "bearer";
-    const payload = (await response.json()) as { authMode?: string };
-    return payload.authMode === "none" ? "none" : "bearer";
+    return response.ok ? ((await response.json()) as GatewayHealth) : null;
   } catch {
-    // Gateway'e ulaşılamıyorsa token'lı snippet üretiyoruz: eksik header
-    // sessiz 401'e yol açar, fazladan header ise zararsızdır.
-    return "bearer";
+    return null;
   }
+}
+
+/** Ulaşılamazsa 'bearer' varsayıyoruz: fazladan header zararsız, eksik header sessiz 401. */
+async function gatewayAuthMode(): Promise<"none" | "bearer"> {
+  const health = await gatewayHealth();
+  return health?.authMode === "none" ? "none" : "bearer";
 }
 
 app.get("/api/projects/:name/endpoint", async (req: Request, res: Response) => {

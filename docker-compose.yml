@@ -30,18 +30,28 @@ services:
     ports:
       - "8099:8099"
       # CBM'in 3D graf arayüzü — daemon tarafından sunulur.
-      - "9749:9749"
+      # CBM arayüzü konteyner içinde 127.0.0.1:9749'a bağlanıyor (bind adresi
+      # seçeneği yok). socat 9750'de dinleyip oraya köprülüyor.
+      - "9749:9750"
     volumes:
       - cbm-data:/data/cbm
       - repos:/data/repos
-    # UI ayarını bir kez kalıcı hale getir, sonra gateway'i başlat.
-    # `--ui=true` kalıcı bir ayardır; TTY olmadığı için komut hemen çıkar
-    # ama ayar yazılır ve daemon UI'ı sonraki oturumda ayağa kaldırır.
+    # CBM graf arayüzünü ayakta tutan üç adım:
+    #
+    # 1. `--ui=true` ayarını kalıcı yaz (config.json'a düşer).
+    # 2. UI'ı SUNAN DAEMON'I AYAKTA TUT. Daemon "son istemci ayrıldı" deyip
+    #    kapanıyor (daemon.runtime_stopping reason=last_committed_client_disconnected),
+    #    UI de onunla gidiyor. `sleep infinity` ile stdin'i açık tutulmuş bir
+    #    MCP oturumu kalıcı istemci görevi görüyor.
+    # 3. socat ile dışarı aç: CBM yalnızca 127.0.0.1'e bağlanıyor, bind adresi
+    #    seçeneği yok.
     entrypoint:
       - /bin/sh
       - -c
       - |
         codebase-memory-mcp --ui=true --port=9749 </dev/null >/dev/null 2>&1 || true
+        ( sleep infinity | codebase-memory-mcp >/dev/null 2>&1 ) &
+        socat TCP-LISTEN:9750,fork,reuseaddr TCP:127.0.0.1:9749 &
         exec "$$@"
       - --
     healthcheck:
@@ -60,8 +70,12 @@ services:
     command: ["node", "control-api/dist/index.js"]
     environment:
       PORT: "8090"
+      # Kullanıcının tarayıcısına gösterilen adresler:
       GATEWAY_BASE_URL: "${GATEWAY_PUBLIC_URL:-http://localhost:8099}"
       CBM_UI_URL: "${CBM_UI_PUBLIC_URL:-http://localhost:9749}"
+      # Konteyner ağı içinden yoklama adresi — 'localhost' OLAMAZ, çünkü
+      # control-api için localhost kendi konteyneridir.
+      GATEWAY_INTERNAL_URL: "http://gateway:8099"
       WEBHOOK_SECRET: "${WEBHOOK_SECRET:-}"
       WATCH_POLL_MS: "${WATCH_POLL_MS:-15000}"
       WATCH_DEBOUNCE_MS: "${WATCH_DEBOUNCE_MS:-60000}"

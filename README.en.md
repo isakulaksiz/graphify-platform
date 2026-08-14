@@ -58,6 +58,29 @@ hold an open MCP session while the other runs a CLI command.
 > race through CBM's per-project locks. To scale, split repositories across
 > separate compose groups / namespaces.
 
+### Three problems solved in Docker
+
+These surfaced during setup; all are handled in `Dockerfile` /
+`docker-compose.yml`, but it helps to know why they are written that way.
+
+**1. The CBM cache directory must be 0700.** The usual `chmod 777` container
+reflex stops CBM entirely:
+`secure CLI coordination could not be created (cache-private)`.
+
+**2. The graph UI binds to 127.0.0.1 only.** There is no bind-address option, so
+Docker port publishing alone does not reach it — a `socat` bridge was added
+(9750 in the container → 127.0.0.1:9749).
+
+**3. The daemon serving the UI stops when the last client disconnects.**
+`daemon.runtime_stopping reason=last_committed_client_disconnected`. A one-shot
+`--ui=true` command exits and takes the UI with it. Fix: a long-lived MCP session
+with stdin held open (`sleep infinity | codebase-memory-mcp`).
+
+**Also:** internal and public addresses are now separate. For `control-api`,
+`localhost` is its own container, so it probes the gateway at
+`http://gateway:8099`. Without that split the snippets were generated wrong —
+an `Authorization` header was added even though no token was required.
+
 ### On-premises Azure DevOps
 
 The address structure has the same shape as the cloud; only the base URL and the
