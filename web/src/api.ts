@@ -62,8 +62,12 @@ export function recoverDaemon(): Promise<{ message: string }> {
  * PAT sunucuda yalnızca bellekte tutulur; diske yazılmaz ve hiçbir yanıtta
  * geri dönmez. Bu yüzden arayüz de saklamaz — tek yönlü gider.
  */
-export function saveAzdoCredentials(org: string, pat: string): Promise<AzdoStatus> {
-  return json("/api/azdo", { method: "POST", body: JSON.stringify({ org, pat }) });
+export function saveAzdoCredentials(
+  org: string,
+  pat: string,
+  baseUrl: string,
+): Promise<AzdoStatus> {
+  return json("/api/azdo", { method: "POST", body: JSON.stringify({ org, pat, baseUrl }) });
 }
 
 export function clearAzdoCredentials(): Promise<AzdoStatus> {

@@ -27,7 +27,93 @@ link to CBM's 3D graph UI.
 The repositories to be indexed do not live in this repo — the platform pulls them
 from Azure DevOps or uses local clones on disk.
 
-## Running
+## Running with Docker
+
+```bash
+cp .env.example .env      # fill in the values
+docker compose up -d --build
+```
+
+UI: **http://localhost:5180**
+
+| Service | Port | Note |
+|---|---|---|
+| `web` | 5180 | nginx; proxies `/api` to control-api |
+| `gateway` | 8099 | MCP endpoints |
+| CBM graph UI | 9749 | served by the daemon in the gateway container |
+| `control-api` | — | not exposed; reachable only through nginx |
+
+Stop: `docker compose down` · also drop data: `docker compose down -v`
+
+### Why gateway and control-api share one image
+
+Both need the CBM binary (297 MB). Separate images would store it twice, so one
+image is built and run with different commands in compose.
+
+They **share** the CBM database via the `cbm-data` volume. This was verified by
+experiment: separate containers can work concurrently on the same volume — one can
+hold an open MCP session while the other runs a CLI command.
+
+> ⚠️ **control-api must stay at one replica.** Two copies indexing at once would
+> race through CBM's per-project locks. To scale, split repositories across
+> separate compose groups / namespaces.
+
+### On-premises Azure DevOps
+
+The address structure has the same shape as the cloud; only the base URL and the
+collection change:
+
+```
+https://devops.company.com / DefaultCollection / project / _git / repo
+└────── AZDO_BASE_URL ────┘ └─── AZDO_ORG ───┘
+```
+
+```bash
+AZDO_BASE_URL=https://devops.company.com
+AZDO_ORG=DefaultCollection
+```
+
+Because the query runs at collection level, repositories from **all projects** in
+that collection appear in the list. The address can also be entered in the UI
+(Source step).
+
+Older servers may not support API 7.1 — lower it with `AZDO_API_VERSION`
+(2019 → `5.1`, 2020 → `6.0`).
+
+### Three things you will hit
+
+**1. Internal CA certificate.** If your server is signed by a corporate CA, Node
+reports `unable to verify the first certificate`. Put the certificate under
+`certs/` and set:
+
+```bash
+NODE_EXTRA_CA_CERTS=/certs/company-ca.crt
+```
+
+`certs/` is mounted read-only into the container and is in `.gitignore`.
+
+**2. Air-gapped image builds.** The `Dockerfile` pulls CBM from npm. Without
+internet access, point the `npm install -g` line at your internal registry or
+`COPY` the binary into the image. Do not leave it to a runtime download.
+
+**3. Public addresses.** `GATEWAY_PUBLIC_URL` and `CBM_UI_PUBLIC_URL` must be
+reachable from the user's browser — the UI prints them in client configurations.
+Do not leave them as `localhost` when deploying to a server.
+
+### A Docker-specific problem, solved
+
+The CBM cache directory must be **owner-private (0700)**. If it is world-writable,
+CBM refuses to run any command:
+
+```
+secure CLI coordination could not be created (cache-private)
+```
+
+The `Dockerfile` therefore assigns `0700` owned by the `node` user rather than
+`chmod 777`. This part will need revisiting for OpenShift, which runs with a
+random UID.
+
+## Running locally (without Docker)
 
 Three separate terminals:
 
@@ -210,6 +296,7 @@ the same graph coming back. No console errors.
 | Local repo branch list + prepare | `master`, cloning skipped, `ready: true` |
 | Azure DevOps — live repo (GRAPHIFY) | Cloned, 2 branches listed, indexed (293/662) |
 | Endpoint test — both transports | All 7 checks passed via `test-endpoint.sh` |
+| Docker: end to end (web → nginx → control-api → CBM) | Real indexing inside containers, 18 nodes / 18 edges |
 
 **Not done:** automatic service-hook subscription from the UI, persistent job/watch
 records and PAT storage (both reset when the process restarts), Entra ID

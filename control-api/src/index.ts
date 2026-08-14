@@ -52,6 +52,7 @@ app.get("/api/azdo", (_req: Request, res: Response) => {
 app.post("/api/azdo", async (req: Request, res: Response) => {
   const org = typeof req.body?.org === "string" ? req.body.org.trim() : "";
   const pat = typeof req.body?.pat === "string" ? req.body.pat : "";
+  const baseUrl = typeof req.body?.baseUrl === "string" ? req.body.baseUrl : undefined;
 
   if (!org || !pat) {
     res.status(400).json({ error: "org ve pat zorunlu." });
@@ -59,7 +60,7 @@ app.post("/api/azdo", async (req: Request, res: Response) => {
   }
 
   try {
-    res.json(await setCredentials(org, pat));
+    res.json(await setCredentials(org, pat, baseUrl));
   } catch (error) {
     // Hata mesajını olduğu gibi geçiyoruz; token değerini içermez.
     res.status(400).json({ error: String(error instanceof Error ? error.message : error) });

@@ -1,0 +1,6 @@
+Şirket içi Azure DevOps kendi CA'sı ile imzalıysa CA sertifikasını buraya koyun
+(örn. kurum-ca.crt) ve .env dosyasında şunu tanımlayın:
+
+  NODE_EXTRA_CA_CERTS=/certs/kurum-ca.crt
+
+Bu dizin konteynere salt okunur bağlanır. Sertifika dosyaları depoya girmez.

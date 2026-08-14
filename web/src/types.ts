@@ -12,6 +12,8 @@ export interface RepoSummary {
 export interface AzdoStatus {
   configured: boolean;
   org?: string;
+  baseUrl?: string;
+  kind?: "cloud" | "server";
   /** PAT'in kaynağı — değerin kendisi hiçbir zaman API'den dönmez. */
   source?: "env" | "runtime";
   reason?: string;

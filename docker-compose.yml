@@ -1,0 +1,112 @@
+# graphify-platform — tek komutla ayağa kalkan kurulum.
+#
+#   docker compose up -d --build
+#   → arayüz http://localhost:5180
+#
+# gateway ve control-api aynı imajı kullanır (ikisi de CBM binary'sine ihtiyaç
+# duyuyor), farklı komutlarla çalışır ve CBM veritabanını **paylaşır**.
+# Bu paylaşım deneyle doğrulandı: ayrı konteynerler aynı volume üzerinden
+# eşzamanlı çalışabiliyor — biri MCP oturumu açıkken diğeri CLI komutu
+# çalıştırabiliyor.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: graphify/platform:latest
+    command: ["node", "gateway/dist/index.js"]
+    environment:
+      PORT: "8099"
+      # 'none': token istenmez. Kuruma açarken 'bearer' yapın ve
+      # GATEWAY_TOKENS tanımlayın — kod değişikliği gerekmez.
+      GATEWAY_AUTH: "${GATEWAY_AUTH:-none}"
+      GATEWAY_TOKENS: "${GATEWAY_TOKENS:-}"
+      # Container'da cgroup limitleri yanlış okunuyor; elle veriyoruz.
+      CBM_WORKERS: "${CBM_WORKERS:-4}"
+      CBM_MEM_BUDGET_MB: "${CBM_MEM_BUDGET_MB:-2048}"
+      # İndeklemeyi klon köküne hapseder — çok kiracılı kurulumda şart.
+      CBM_ALLOWED_ROOT: /data/repos
+    ports:
+      - "8099:8099"
+      # CBM'in 3D graf arayüzü — daemon tarafından sunulur.
+      - "9749:9749"
+    volumes:
+      - cbm-data:/data/cbm
+      - repos:/data/repos
+    # UI ayarını bir kez kalıcı hale getir, sonra gateway'i başlat.
+    # `--ui=true` kalıcı bir ayardır; TTY olmadığı için komut hemen çıkar
+    # ama ayar yazılır ve daemon UI'ı sonraki oturumda ayağa kaldırır.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        codebase-memory-mcp --ui=true --port=9749 </dev/null >/dev/null 2>&1 || true
+        exec "$$@"
+      - --
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8099/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  control-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: graphify/platform:latest
+    command: ["node", "control-api/dist/index.js"]
+    environment:
+      PORT: "8090"
+      GATEWAY_BASE_URL: "${GATEWAY_PUBLIC_URL:-http://localhost:8099}"
+      CBM_UI_URL: "${CBM_UI_PUBLIC_URL:-http://localhost:9749}"
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET:-}"
+      WATCH_POLL_MS: "${WATCH_POLL_MS:-15000}"
+      WATCH_DEBOUNCE_MS: "${WATCH_DEBOUNCE_MS:-60000}"
+      # Azure DevOps kimliği arayüzden de girilebilir; burada vermek zorunlu değil.
+      # Şirket içi kurulum için taban adresi: https://devops.kurum.com.tr
+      AZDO_BASE_URL: "${AZDO_BASE_URL:-https://dev.azure.com}"
+      AZDO_API_VERSION: "${AZDO_API_VERSION:-7.1}"
+      AZDO_ORG: "${AZDO_ORG:-}"
+      AZDO_PAT: "${AZDO_PAT:-}"
+      # Şirket içi sunucu kendi CA'sı ile imzalıysa Node aksi halde
+      # "unable to verify the first certificate" der. CA paketini bağlayın:
+      #   ./certs/kurum-ca.crt  →  /certs/ca.crt
+      NODE_EXTRA_CA_CERTS: "${NODE_EXTRA_CA_CERTS:-}"
+      CBM_WORKERS: "${CBM_WORKERS:-4}"
+      CBM_MEM_BUDGET_MB: "${CBM_MEM_BUDGET_MB:-2048}"
+    volumes:
+      - cbm-data:/data/cbm
+      - repos:/data/repos
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    # ⚠️ Tek replika. İki control-api aynı anda indeksleme yaparsa CBM'in
+    # proje bazlı kilitleri üzerinden yarışırlar; ölçekleme gerekiyorsa
+    # repoları ayrı compose/namespace gruplarına bölün.
+    deploy:
+      replicas: 1
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: graphify/web:latest
+    ports:
+      - "5180:80"
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
+volumes:
+  # CBM'in graf veritabanı — gateway ve control-api paylaşır.
+  cbm-data:
+  # Klonlanan repolar.
+  repos:

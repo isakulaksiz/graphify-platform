@@ -27,7 +27,89 @@ ve CBM'in 3D graf arayüzüne bağlantı.
 İndekslenecek repolar bu depoda değil — platform onları Azure DevOps'tan çeker veya
 diskteki yerel klonları kullanır.
 
-## Çalıştırma
+## Docker ile çalıştırma
+
+```bash
+cp .env.example .env      # değerleri doldurun
+docker compose up -d --build
+```
+
+Arayüz: **http://localhost:5180**
+
+| Servis | Port | Not |
+|---|---|---|
+| `web` | 5180 | nginx; `/api` isteklerini control-api'ye yönlendirir |
+| `gateway` | 8099 | MCP endpoint'leri |
+| CBM graf arayüzü | 9749 | gateway konteynerindeki daemon sunar |
+| `control-api` | — | dışarı açılmaz, yalnızca nginx üzerinden erişilir |
+
+Durdurmak: `docker compose down` · verileri de silmek: `docker compose down -v`
+
+### Neden gateway ve control-api aynı imaj
+
+İkisi de CBM binary'sine ihtiyaç duyuyor (297 MB). Ayrı imajlar yapmak onu iki kez
+saklamak olurdu; tek imaj kurulup compose'da farklı komutlarla çalıştırılıyor.
+
+CBM veritabanını **paylaşıyorlar** — `cbm-data` volume'ü. Bunun çalıştığını deneyle
+doğruladım: ayrı konteynerler aynı volume üzerinden eşzamanlı çalışabiliyor, biri
+MCP oturumu açıkken diğeri CLI komutu çalıştırabiliyor.
+
+> ⚠️ **control-api tek replika olmalı.** İki kopya aynı anda indeksleme yaparsa
+> CBM'in proje bazlı kilitleri üzerinden yarışırlar. Ölçekleme gerekiyorsa repoları
+> ayrı compose grupları/namespace'lere bölün.
+
+### Şirket içi Azure DevOps (on-prem)
+
+Adres yapısı bulut ile aynı şekle sahip, sadece taban adres ve koleksiyon değişiyor:
+
+```
+https://devops.kurum.com.tr / DefaultCollection / proje / _git / repo
+└──────── AZDO_BASE_URL ────┘ └─── AZDO_ORG ───┘
+```
+
+```bash
+AZDO_BASE_URL=https://devops.kurum.com.tr
+AZDO_ORG=DefaultCollection
+```
+
+Koleksiyon seviyesinden sorgulandığı için o koleksiyondaki **tüm projelerin**
+repoları listeye düşer. Adres arayüzden de girilebilir (Kaynak adımı).
+
+Eski sunucular API 7.1'i desteklemeyebilir — `AZDO_API_VERSION` ile düşürün
+(2019 → `5.1`, 2020 → `6.0`).
+
+### Karşılaşacağınız üç şey
+
+**1. İç CA sertifikası.** Sunucunuz kurum CA'sı ile imzalıysa Node
+`unable to verify the first certificate` der. Sertifikayı `certs/` altına koyup:
+
+```bash
+NODE_EXTRA_CA_CERTS=/certs/kurum-ca.crt
+```
+
+`certs/` dizini konteynere salt okunur bağlanır ve `.gitignore`'dadır.
+
+**2. Kapalı ortamda imaj kurulumu.** `Dockerfile` CBM'i npm'den çekiyor. İnternet
+yoksa `npm install -g` satırını iç registry'nize yönlendirin veya binary'yi
+`COPY` ile imaja gömün. Çalışma anında indirmeye bırakmayın.
+
+**3. Genel adresler.** `GATEWAY_PUBLIC_URL` ve `CBM_UI_PUBLIC_URL` kullanıcının
+tarayıcısından erişilebilen adresler olmalı — arayüz bunları istemci
+yapılandırmalarında gösteriyor. Sunucuya kurarken `localhost` bırakmayın.
+
+### Docker'a özel çözülen sorun
+
+CBM cache dizini **sahibine özel (0700)** olmak zorunda. Dünyaya açık bırakılırsa
+şu hatayla reddediyor ve hiçbir komut çalışmıyor:
+
+```
+secure CLI coordination could not be created (cache-private)
+```
+
+`Dockerfile` bu yüzden `chmod 777` değil, `node` kullanıcısına ait `0700` veriyor.
+OpenShift'e taşırken rastgele UID nedeniyle bu kısmın gözden geçirilmesi gerekecek.
+
+## Yerel çalıştırma (Docker'sız)
 
 Üçünü ayrı terminallerde:
 
@@ -210,6 +292,7 @@ Otomatik güncelleme ayrı bir test reposuyla doğrulandı:
 | Yerel repo dal listesi + hazırlama | `master`, klonlama atlandı, `ready: true` |
 | Azure DevOps — canlı repo (GRAPHIFY) | Klonlandı, 2 dal listelendi, indekslendi (293/662) |
 | Endpoint testi — her iki transport | `test-endpoint.sh` ile 7 kontrolün tamamı geçti |
+| Docker: uçtan uca (web → nginx → control-api → CBM) | Konteynerde gerçek indeksleme, 18 node / 18 edge |
 
 **Yapılmadı:** service hook aboneliğinin arayüzden otomatik kurulması, kalıcı iş/izleme
 kaydı ve PAT saklama (süreç yeniden başlarsa sıfırlanır), Entra ID entegrasyonu,

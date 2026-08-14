@@ -16,6 +16,7 @@ export function AzdoConnect({
   status: AzdoStatus;
   onChange: (status: AzdoStatus) => void;
 }) {
+  const [baseUrl, setBaseUrl] = useState(status.baseUrl ?? "https://dev.azure.com");
   const [org, setOrg] = useState(status.org ?? "");
   const [pat, setPat] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,7 +26,7 @@ export function AzdoConnect({
     setBusy(true);
     setError(null);
     try {
-      const next = await saveAzdoCredentials(org, pat);
+      const next = await saveAzdoCredentials(org, pat, baseUrl);
       setPat(""); // token'ı bellekte tutma
       onChange(next);
     } catch (caught) {
@@ -49,10 +50,11 @@ export function AzdoConnect({
       <div className="flex items-center justify-between rounded-lg border border-emerald-900 bg-emerald-950/30 px-4 py-3">
         <div className="text-sm">
           <p className="font-medium text-emerald-200">
-            Azure DevOps bağlı — dev.azure.com/{status.org}
+            Azure DevOps bağlı — {(status.baseUrl ?? "").replace(/^https?:\/\//, "")}/{status.org}
           </p>
           <p className="mt-0.5 text-xs text-emerald-300/70">
-            Token kaynağı: {status.source === "env" ? "ortam değişkeni" : "arayüzden girildi"}
+            {status.kind === "server" ? "Şirket içi sunucu" : "Bulut"} · token kaynağı:{" "}
+            {status.source === "env" ? "ortam değişkeni" : "arayüzden girildi"}
           </p>
         </div>
         <Button variant="ghost" onClick={() => void disconnect()} disabled={busy}>
@@ -69,8 +71,15 @@ export function AzdoConnect({
         <p className="mt-0.5 text-xs text-amber-300/80">{status.reason}</p>
       </div>
 
+      <Field
+        label="Sunucu adresi"
+        hint="Bulut için https://dev.azure.com — şirket içi kurulumda kendi adresiniz."
+      >
+        <TextInput value={baseUrl} onChange={setBaseUrl} placeholder="https://dev.azure.com" mono />
+      </Field>
+
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Organizasyon">
+        <Field label="Organizasyon / koleksiyon">
           <TextInput value={org} onChange={setOrg} placeholder="organizasyon-adi" />
         </Field>
         <Field label="Personal Access Token">
@@ -94,7 +103,7 @@ export function AzdoConnect({
       {error && <Callout tone="error" title="Bağlanılamadı">{error}</Callout>}
 
       <div className="flex justify-end">
-        <Button onClick={() => void connect()} disabled={busy || !org.trim() || !pat}>
+        <Button onClick={() => void connect()} disabled={busy || !org.trim() || !pat || !baseUrl.trim()}>
           {busy ? "Doğrulanıyor…" : "Bağlan ve repoları listele"}
         </Button>
       </div>

@@ -11,3 +11,7 @@ build/
 *.log
 .DS_Store
 .claude/settings.local.json
+
+# İç CA sertifikaları — depoya girmez
+certs/*
+!certs/.gitkeep
