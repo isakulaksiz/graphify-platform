@@ -254,6 +254,22 @@ Azure DevOps HMAC imzası göndermediği için üretimde **IP allowlist** de ger
 | `WATCH_DEBOUNCE_MS` | 5000 | Push birleştirme penceresi (üretimde 60000 önerilir) |
 | `WEBHOOK_SECRET` | — | Webhook basic auth parolası |
 
+### Webhook parolası (`WEBHOOK_SECRET`)
+
+Bir yerden alınmaz — siz üretirsiniz:
+
+```bash
+openssl rand -base64 32
+```
+
+Aynı değeri **iki yere** yazın: `.env` dosyasına ve Azure DevOps service hook
+aboneliğindeki `consumerInputs.basicAuthPassword` alanına. Alıcı, gelen isteğin
+gerçekten Azure DevOps'tan geldiğini bununla doğrular.
+
+Boş bırakılırsa doğrulama atlanır ve alıcıya erişebilen herkes indeksleme
+tetikleyebilir. Azure DevOps HMAC imzası göndermediği için tek savunma budur;
+üretimde yanına **IP allowlist** de gerekir.
+
 ## CBM'i programatik çağırırken bilinmesi gerekenler
 
 Deneyle bulunmuş, dokümante edilmemiş davranışlar. Faz 2'de indexer worker'ı yazarken

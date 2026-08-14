@@ -260,6 +260,23 @@ checked. Azure DevOps does not send HMAC signatures, so production also needs an
 | `WATCH_DEBOUNCE_MS` | 5000 | Push coalescing window (60000 recommended in production) |
 | `WEBHOOK_SECRET` | — | Webhook basic-auth password |
 
+### The webhook password (`WEBHOOK_SECRET`)
+
+It is not obtained from anywhere — you generate it:
+
+```bash
+openssl rand -base64 32
+```
+
+Put the same value in **two places**: your `.env` file, and the
+`consumerInputs.basicAuthPassword` field of the Azure DevOps service hook
+subscription. The receiver uses it to verify that a request really came from
+Azure DevOps.
+
+If left empty, verification is skipped and anyone who can reach the receiver can
+trigger indexing. Azure DevOps sends no HMAC signature, so this is the only
+defense; production also needs an **IP allowlist**.
+
 ## What you need to know when calling CBM programmatically
 
 Behaviors found by experiment, none of them documented. The same traps apply to
