@@ -331,6 +331,7 @@ export default function App() {
                 setAzdo(status);
                 loadRepos();
               }}
+              onReload={loadRepos}
               footer={navButtons(null, {
                 label: "Devam",
                 action: () => setCurrent("scope"),

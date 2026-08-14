@@ -8,7 +8,7 @@ import {
   listRepos,
   setCredentials,
 } from "./azdo.js";
-import { clonePathFor, localBranches, prepareRepo } from "./clone.js";
+import { clonePathFor, displayName, lastCommit, localBranches, prepareRepo } from "./clone.js";
 import { deleteProject, listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
@@ -200,10 +200,13 @@ app.get("/api/catalog", async (_req: Request, res: Response) => {
     const authMode = health?.authMode === "none" ? "none" : "bearer";
     const watches = listWatches();
 
-    const entries = projects.map((p) => {
+    const entries = await Promise.all(projects.map(async (p) => {
       const watch = watches.find((w) => w.repoPath === p.rootPath);
+      const commit = await lastCommit(p.rootPath).catch(() => null);
       return {
         project: p.name,
+        displayName: displayName(p.rootPath),
+        lastCommit: commit,
         rootPath: p.rootPath,
         branch: p.branch,
         nodes: p.nodes,
@@ -216,7 +219,7 @@ app.get("/api/catalog", async (_req: Request, res: Response) => {
           ? { enabled: true, branch: watch.branch, lastSha: watch.lastSha, lastTrigger: watch.lastTrigger }
           : { enabled: false },
       };
-    });
+    }));
 
     res.json({
       authMode,

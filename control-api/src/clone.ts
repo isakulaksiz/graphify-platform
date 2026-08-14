@@ -146,3 +146,51 @@ export async function localBranches(repoPath: string): Promise<string[]> {
   if (result.code !== 0) return [];
   return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean).sort();
 }
+
+
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+/**
+ * Klonun son commit bilgisini okur.
+ *
+ * Katalogda "bu graf hangi koddan çıkarıldı" sorusunu cevaplıyor — sha olmadan
+ * grafın güncel mi bayat mı olduğu anlaşılmıyor.
+ */
+export async function lastCommit(repoPath: string): Promise<CommitInfo | null> {
+  const result = await git(
+    ["log", "-1", "--format=%H%x1f%an%x1f%aI%x1f%s"],
+    repoPath,
+  ).catch(() => null);
+  if (!result || result.code !== 0 || !result.stdout) return null;
+
+  const [sha, author, date, subject] = result.stdout.split("\u001f");
+  if (!sha) return null;
+  return { sha, shortSha: sha.slice(0, 10), author: author ?? "", date: date ?? "", subject: subject ?? "" };
+}
+
+/**
+ * Teknik proje adından okunabilir bir ad türetir.
+ *
+ * CBM proje adını klon yolundan üretiyor:
+ *   /data/repos/GRAPHIFY-GRAPHIFY-2b08ec87  →  data-repos-GRAPHIFY-GRAPHIFY-2b08ec87
+ *
+ * Buradan dizin adını alıp sondaki 8 haneli kimliği ve tekrarlanan
+ * proje/repo adını temizliyoruz. Yerel repolarda dizin adı zaten okunabilir.
+ */
+export function displayName(rootPath: string): string {
+  const base = rootPath.split("/").filter(Boolean).at(-1) ?? rootPath;
+  const withoutId = base.replace(/-[0-9a-f]{8}$/i, "");
+  const parts = withoutId.split("-");
+
+  // "GRAPHIFY-GRAPHIFY" gibi proje adı = repo adı durumunu sadeleştir.
+  if (parts.length >= 2 && parts[0] === parts[1]) {
+    return parts.slice(1).join("-");
+  }
+  return withoutId;
+}

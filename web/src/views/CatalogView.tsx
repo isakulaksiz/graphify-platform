@@ -3,6 +3,14 @@ import { deleteProject, fetchCatalog } from "../api";
 import { Button, Callout, TextInput } from "../components/ui";
 import type { CatalogEntry, CatalogResponse } from "../types";
 
+function relativeDate(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days === 0) return "bugün";
+  if (days === 1) return "dün";
+  if (days < 30) return `${days} gün önce`;
+  return new Date(iso).toLocaleDateString("tr-TR");
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -67,9 +75,12 @@ function ProjectCard({
     <article className="rounded-xl border border-[var(--color-edge)] bg-[var(--color-panel)] p-5">
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="truncate font-mono text-sm font-medium text-gray-100">
-            {entry.project}
+          <h3 className="truncate text-base font-semibold text-gray-100">
+            {entry.displayName}
           </h3>
+          <p className="mt-0.5 truncate font-mono text-[11px] text-gray-600">
+            {entry.project}
+          </p>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
             <span>
               <span className="text-gray-300">{entry.nodes.toLocaleString("tr-TR")}</span> node
@@ -132,6 +143,15 @@ function ProjectCard({
         </div>
       </header>
 
+      {entry.lastCommit && (
+        <p className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-[var(--color-edge)] pt-3 text-xs text-gray-500">
+          <span className="font-mono text-gray-400">{entry.lastCommit.shortSha}</span>
+          <span className="min-w-0 truncate text-gray-300">{entry.lastCommit.subject}</span>
+          <span>· {entry.lastCommit.author}</span>
+          <span>· {relativeDate(entry.lastCommit.date)}</span>
+        </p>
+      )}
+
       {confirming && !busy && (
         <p className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-200">
           Graf silinecek ve bu adresler çalışmayı bırakacak. Kaynak kod klonu diskte
@@ -155,6 +175,32 @@ function ProjectCard({
               ? `claude mcp add --transport http graphify ${entry.streamableHttpUrl} --header "Authorization: Bearer <TOKEN>"`
               : `claude mcp add --transport http graphify ${entry.streamableHttpUrl}`
           }
+        />
+        <UrlRow
+          label="Codex CLI"
+          url={
+            authMode === "bearer"
+              ? `[mcp_servers.graphify]\nurl = "${entry.streamableHttpUrl}"\nhttp_headers = { Authorization = "Bearer <TOKEN>" }`
+              : `[mcp_servers.graphify]\nurl = "${entry.streamableHttpUrl}"`
+          }
+        />
+        <UrlRow
+          label="VS Code Copilot"
+          url={JSON.stringify(
+            {
+              servers: {
+                graphify: {
+                  type: "http",
+                  url: entry.streamableHttpUrl,
+                  ...(authMode === "bearer"
+                    ? { headers: { Authorization: "Bearer <TOKEN>" } }
+                    : {}),
+                },
+              },
+            },
+            null,
+            2,
+          )}
         />
       </div>
     </article>
@@ -189,6 +235,7 @@ export function CatalogView() {
     if (!needle) return projects;
     return projects.filter(
       (p) =>
+        p.displayName.toLowerCase().includes(needle) ||
         p.project.toLowerCase().includes(needle) ||
         p.rootPath.toLowerCase().includes(needle),
     );

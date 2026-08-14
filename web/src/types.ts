@@ -95,8 +95,19 @@ export interface CbmUiStatus {
   reason?: string;
 }
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
 export interface CatalogEntry {
   project: string;
+  /** Okunabilir ad — kart başlığında bu gösterilir. */
+  displayName: string;
+  lastCommit: CommitInfo | null;
   rootPath: string;
   branch?: string;
   nodes: number;
