@@ -9,7 +9,7 @@ import {
   setCredentials,
 } from "./azdo.js";
 import { clonePathFor, localBranches, prepareRepo } from "./clone.js";
-import { listProjects, recoverDaemon } from "./cbm.js";
+import { deleteProject, listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
 import { getWatch, listWatches, notifyPush, startWatch, stopWatch } from "./watcher.js";
@@ -186,6 +186,68 @@ app.get("/api/cbm-ui", async (req: Request, res: Response) => {
             "açtığında daemon tarafından başlatılır — henüz hiç bağlantı olmadıysa kapalıdır.",
         }),
   });
+});
+
+/**
+ * Katalog — indekslenmiş her projenin adı, istatistikleri ve MCP adresleri.
+ *
+ * Geliştiricilere paylaşılan ekran bunu kullanıyor: kendi reposunu bulup
+ * MCP adresini kopyalıyor.
+ */
+app.get("/api/catalog", async (_req: Request, res: Response) => {
+  try {
+    const [projects, health] = await Promise.all([listProjects(), gatewayHealth()]);
+    const authMode = health?.authMode === "none" ? "none" : "bearer";
+    const watches = listWatches();
+
+    const entries = projects.map((p) => {
+      const watch = watches.find((w) => w.repoPath === p.rootPath);
+      return {
+        project: p.name,
+        rootPath: p.rootPath,
+        branch: p.branch,
+        nodes: p.nodes,
+        edges: p.edges,
+        sizeBytes: p.sizeBytes,
+        streamableHttpUrl: `${GATEWAY_BASE}/mcp/${p.name}`,
+        sseUrl: `${GATEWAY_BASE}/mcp/${p.name}/sse`,
+        graphUrl: `${CBM_UI_URL}/?tab=graph&project=${encodeURIComponent(p.name)}`,
+        autoUpdate: watch
+          ? { enabled: true, branch: watch.branch, lastSha: watch.lastSha, lastTrigger: watch.lastTrigger }
+          : { enabled: false },
+      };
+    });
+
+    res.json({
+      authMode,
+      gatewayBaseUrl: GATEWAY_BASE,
+      cbmUiAvailable: health?.cbmUi?.available === true,
+      projects: entries,
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
+/**
+ * Bir projenin grafını siler.
+ *
+ * Sıra önemli: önce izlemeyi durdur (yoksa bir sonraki yoklama projeyi
+ * hemen yeniden indeksler), sonra grafı sil. Klonlanan kaynak kod diskte
+ * kalır — yeniden indekslemek istenirse tekrar klonlama maliyeti ödenmesin.
+ */
+app.delete("/api/projects/:name", async (req: Request, res: Response) => {
+  const project = String(req.params.name);
+  try {
+    const watch = listWatches().find((w) => w.repoName === project || w.repoPath.endsWith(project));
+    if (watch) stopWatch(watch.repoPath);
+
+    await deleteProject(project);
+    console.info(`[katalog] proje silindi: ${project}${watch ? " (izleme de durduruldu)" : ""}`);
+    res.json({ deleted: project, watchStopped: Boolean(watch) });
+  } catch (error) {
+    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+  }
 });
 
 app.get("/api/projects", async (_req: Request, res: Response) => {

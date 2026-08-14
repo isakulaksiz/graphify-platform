@@ -1,6 +1,7 @@
 import type {
   AzdoStatus,
   BranchList,
+  CatalogResponse,
   CbmUiStatus,
   EndpointInfo,
   JobEvent,
@@ -68,6 +69,15 @@ export function saveAzdoCredentials(
   baseUrl: string,
 ): Promise<AzdoStatus> {
   return json("/api/azdo", { method: "POST", body: JSON.stringify({ org, pat, baseUrl }) });
+}
+
+export function fetchCatalog(): Promise<CatalogResponse> {
+  return json("/api/catalog");
+}
+
+/** Bir projenin grafını siler. İzleme açıksa sunucu tarafında durdurulur. */
+export function deleteProject(project: string): Promise<{ deleted: string }> {
+  return json(`/api/projects/${encodeURIComponent(project)}`, { method: "DELETE" });
 }
 
 export function clearAzdoCredentials(): Promise<AzdoStatus> {

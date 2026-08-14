@@ -73,6 +73,49 @@ function filterListProjectsResult(result: unknown, project: string): unknown {
 }
 
 /**
+ * CBM'in hata yanıtlarındaki `available_projects` alanını siler.
+ *
+ * NEDEN: proje bulunamadığında CBM yanıta indekslenmiş TÜM projelerin adlarını
+ * ekliyor. `list_projects`'i süzmek yetmiyor — aynı bilgi bu yoldan sızıyor.
+ * Örneğin silinmiş bir adrese bağlanan biri diğer tüm repoların adlarını görür.
+ *
+ * Bu, daha önce `structuredContent` ile yakalanan sızıntıyla aynı sınıfta:
+ * kapsamlama yalnızca beklenen yolda uygulanırsa yan yollardan delinir.
+ */
+function stripProjectList(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripProjectList);
+  if (typeof value !== "object" || value === null) return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "available_projects") continue;
+    out[key] = stripProjectList(item);
+  }
+  return out;
+}
+
+/** Metin içeriğindeki JSON gövdesinden de aynı alanı temizler. */
+function sanitizeResult(result: unknown): unknown {
+  const cleaned = stripProjectList(result) as Record<string, unknown>;
+  if (!Array.isArray(cleaned.content)) return cleaned;
+
+  cleaned.content = cleaned.content.map((block) => {
+    if (typeof block !== "object" || block === null) return block;
+    const record = block as Record<string, unknown>;
+    if (record.type !== "text" || typeof record.text !== "string") return block;
+    if (!record.text.includes("available_projects")) return block;
+
+    try {
+      return { ...record, text: JSON.stringify(stripProjectList(JSON.parse(record.text))) };
+    } catch {
+      // Ayrıştırılamıyorsa alanı bulunduğu yerde kesip at.
+      return { ...record, text: record.text.replace(/"available_projects":\s*\[[^\]]*\],?/g, "") };
+    }
+  });
+  return cleaned;
+}
+
+/**
  * Tek bir proje ve tek bir kimlik için kapsamlanmış MCP sunucusu üretir.
  *
  * Her HTTP oturumu kendi Server örneğini alır; hepsi aynı paylaşımlı CBM
@@ -126,9 +169,9 @@ export function createScopedServer(
     const result = await client.callTool({ name: toolName, arguments: scopedArgs });
 
     if (toolName === "list_projects") {
-      return filterListProjectsResult(result, project) as typeof result;
+      return sanitizeResult(filterListProjectsResult(result, project)) as typeof result;
     }
-    return result;
+    return sanitizeResult(result) as typeof result;
   });
 
   return server;

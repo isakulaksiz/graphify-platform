@@ -94,3 +94,28 @@ export interface CbmUiStatus {
   baseUrl: string;
   reason?: string;
 }
+
+export interface CatalogEntry {
+  project: string;
+  rootPath: string;
+  branch?: string;
+  nodes: number;
+  edges: number;
+  sizeBytes: number;
+  streamableHttpUrl: string;
+  sseUrl: string;
+  graphUrl: string;
+  autoUpdate: {
+    enabled: boolean;
+    branch?: string;
+    lastSha?: string | null;
+    lastTrigger?: { at: string; sha: string; source: "poll" | "webhook" };
+  };
+}
+
+export interface CatalogResponse {
+  authMode: "none" | "bearer";
+  gatewayBaseUrl: string;
+  cbmUiAvailable: boolean;
+  projects: CatalogEntry[];
+}

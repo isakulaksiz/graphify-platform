@@ -13,6 +13,7 @@ import {
   subscribeToJob,
 } from "./api";
 import { Stepper } from "./components/Stepper";
+import { CatalogView } from "./views/CatalogView";
 import { Button } from "./components/ui";
 import { AutomationStep } from "./steps/AutomationStep";
 import { EndpointStep } from "./steps/EndpointStep";
@@ -42,7 +43,11 @@ const STEPS: StepDefinition[] = [
   { id: "endpoint", title: "Endpoint", subtitle: "MCP bağlantısı" },
 ];
 
+type View = "wizard" | "catalog";
+
 export default function App() {
+  /** Üst sekmeler: indeksleme sihirbazı ve paylaşılan katalog. */
+  const [view, setView] = useState<View>("wizard");
   const [current, setCurrent] = useState("source");
 
   const [repos, setRepos] = useState<RepoSummary[]>([]);
@@ -269,9 +274,32 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-[var(--color-edge)] px-6 py-3">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-base font-semibold text-gray-100">Graphify</h1>
-          <span className="text-xs text-gray-500">kod grafı indeksleme ve MCP yayını</span>
+        <div className="flex items-center gap-6">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-base font-semibold text-gray-100">Graphify</h1>
+            <span className="hidden text-xs text-gray-500 sm:inline">
+              kod grafı indeksleme ve MCP yayını
+            </span>
+          </div>
+          <nav className="flex items-center gap-1">
+            {([
+              ["wizard", "İndeksleme"],
+              ["catalog", "Katalog"],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setView(id)}
+                className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                  view === id
+                    ? "bg-[var(--color-panel)] text-gray-100"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
         </div>
         {azdo?.org && (
           <span className="font-mono text-xs text-gray-500">
@@ -280,6 +308,11 @@ export default function App() {
         )}
       </header>
 
+      {view === "catalog" ? (
+        <div className="min-h-0 flex-1 overflow-hidden p-6">
+          <CatalogView />
+        </div>
+      ) : (
       <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-6 p-6">
         <aside className="min-h-0 overflow-y-auto">
           <Stepper steps={STEPS} statuses={statuses} current={current} onSelect={setCurrent} />
@@ -388,6 +421,7 @@ export default function App() {
           )}
         </main>
       </div>
+      )}
     </div>
   );
 }

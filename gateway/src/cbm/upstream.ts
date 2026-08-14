@@ -1,10 +1,6 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Config } from "../config.js";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * codebase-memory-mcp'ye giden TEK paylaşımlı stdio bağlantısı.
@@ -97,16 +93,20 @@ export class CbmUpstream {
   /**
    * Takılı upstream'i kurtarır.
    *
-   * Sıra önemli: önce kendi bağlantımızı kapatırız, sonra bu container'da
-   * kalan CBM süreçlerini temizleriz. İkinci adım olmadan takılı daemon
-   * cohort claim'i tutmaya devam eder ve yeni süreç de 30 sn sonra hata verir.
+   * YALNIZCA KENDİ ÇOCUK SÜRECİMİZİ öldürürüz.
    *
-   * NOT: pkill bu container'ın PID namespace'i ile sınırlıdır. Indexer worker
-   * ayrı bir pod'da çalıştığı için onun süreçleri etkilenmez.
+   * Burada önceden `pkill -f codebase-memory-mcp` vardı ve ciddi bir hataya yol
+   * açıyordu: konteynerde CBM'in graf arayüzünü ayakta tutan daemon da aynı
+   * desene uyduğu için her kurtarmada o da ölüyordu. Sonuç, arayüzü kalıcı
+   * olarak kapatan bir kurtarma döngüsüydü (42 deneme gözlendi).
+   *
+   * Takılı bir yabancı daemon'ı temizlemek gerekirse bu, kullanıcının bilerek
+   * tetiklediği bir işlem olmalı (control-api'deki /api/recover), otomatik değil.
    */
   async recover(reason: string): Promise<void> {
     console.error(`[upstream] kurtarma başlatıldı: ${reason}`);
     const transport = this.transport;
+    const pid = transport?.pid ?? null;
     this.client = null;
     this.transport = null;
 
@@ -116,11 +116,14 @@ export class CbmUpstream {
       });
     }
 
-    try {
-      await execFileAsync("pkill", ["-f", "codebase-memory-mcp"]);
-      console.error("[upstream] kalan CBM süreçleri temizlendi");
-    } catch {
-      // pkill eşleşme bulamazsa 1 ile çıkar — bu normal, temizlenecek bir şey yoktu.
+    // transport.close() çocuğu sonlandırmadıysa hedefli olarak öldür.
+    if (pid !== null) {
+      try {
+        process.kill(pid, "SIGKILL");
+        console.error(`[upstream] çocuk süreç sonlandırıldı (pid=${pid})`);
+      } catch {
+        // Süreç zaten çıkmış — beklenen durum.
+      }
     }
   }
 
@@ -136,14 +139,40 @@ export class CbmUpstream {
     await Promise.race([client.listTools(), timeout]);
   }
 
-  /** Periyodik sağlık kontrolünü başlatır. */
-  startHealthLoop(): void {
-    this.healthTimer = setInterval(() => {
-      void this.probe().catch(async (error: unknown) => {
-        await this.recover(`sağlık kontrolü başarısız: ${String(error)}`);
-      });
-    }, this.config.upstreamHealthIntervalMs);
+  /**
+   * Bağlantıyı açar ve canlı tutar.
+   *
+   * Açılışta hemen bağlanmak önemli: gateway'in CBM oturumu, daemon'ın
+   * "committed client"ı olarak sayılıyor ve daemon graf arayüzünü sunuyor.
+   * Bağlantı tembel açılırsa hiç kimse MCP'ye bağlanmadığı sürece arayüz de
+   * kapalı kalır.
+   */
+  async startHealthLoop(): Promise<void> {
+    // Üst üste başarısızlıkta kurtar — tek bir geçici hata süreci öldürmesin.
+    let consecutiveFailures = 0;
+
+    const tick = async (): Promise<void> => {
+      try {
+        await this.probe();
+        consecutiveFailures = 0;
+      } catch (error) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 2) {
+          consecutiveFailures = 0;
+          await this.recover(`sağlık kontrolü üst üste başarısız: ${String(error)}`);
+        } else {
+          console.warn(`[upstream] sağlık kontrolü başarısız (1/2): ${String(error)}`);
+        }
+      }
+    };
+
+    this.healthTimer = setInterval(() => void tick(), this.config.upstreamHealthIntervalMs);
     this.healthTimer.unref();
+
+    // İlk bağlantıyı şimdi kur; başarısız olursa sağlık döngüsü tekrar dener.
+    await this.getClient().catch((error: unknown) => {
+      console.error(`[upstream] açılışta bağlanılamadı: ${String(error)}`);
+    });
   }
 
   async close(): Promise<void> {

@@ -201,6 +201,20 @@ export function indexRepository(
   return { done, cancel: () => child.kill("SIGTERM") };
 }
 
+/**
+ * Bir projenin grafını siler.
+ *
+ * CBM'in kendi `delete_project` aracını kullanıyoruz — veritabanı dosyasını
+ * elle silmek daemon'ın açık tuttuğu bağlantılarla çakışır.
+ */
+export async function deleteProject(project: string): Promise<void> {
+  const { stdout, code } = await runCbm(["cli", "delete_project", "--project", project]);
+  if (code !== 0) {
+    throw new Error(`delete_project ${code} koduyla çıktı: ${stdout.slice(-200)}`);
+  }
+  invalidateProjectCache();
+}
+
 /** Takılı daemon'ı kurtarır — bkz. gateway/README.md "Daemon kurtarma". */
 export async function recoverDaemon(): Promise<void> {
   await new Promise<void>((resolve) => {

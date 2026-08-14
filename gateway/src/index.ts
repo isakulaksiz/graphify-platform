@@ -293,7 +293,7 @@ const httpServer = app.listen(config.port, config.host, () => {
   } else {
     console.info(`[gateway] kimlik doğrulama: bearer, tanımlı token: ${tokens.size}`);
   }
-  upstream.startHealthLoop();
+  void upstream.startHealthLoop();
 });
 
 async function shutdown(signal: string): Promise<void> {

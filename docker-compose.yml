@@ -36,21 +36,20 @@ services:
     volumes:
       - cbm-data:/data/cbm
       - repos:/data/repos
-    # CBM graf arayüzünü ayakta tutan üç adım:
+    # CBM graf arayüzü için iki adım:
     #
     # 1. `--ui=true` ayarını kalıcı yaz (config.json'a düşer).
-    # 2. UI'ı SUNAN DAEMON'I AYAKTA TUT. Daemon "son istemci ayrıldı" deyip
-    #    kapanıyor (daemon.runtime_stopping reason=last_committed_client_disconnected),
-    #    UI de onunla gidiyor. `sleep infinity` ile stdin'i açık tutulmuş bir
-    #    MCP oturumu kalıcı istemci görevi görüyor.
-    # 3. socat ile dışarı aç: CBM yalnızca 127.0.0.1'e bağlanıyor, bind adresi
+    # 2. socat ile dışarı aç — CBM yalnızca 127.0.0.1'e bağlanıyor, bind adresi
     #    seçeneği yok.
+    #
+    # Arayüzü ayakta tutan şey gateway'in kendi CBM bağlantısıdır: daemon onu
+    # "committed client" sayıyor ve varlığı sürece arayüzü sunuyor. Gateway
+    # açılışta hemen bağlanıp sağlık döngüsüyle bağlantıyı canlı tutuyor.
     entrypoint:
       - /bin/sh
       - -c
       - |
         codebase-memory-mcp --ui=true --port=9749 </dev/null >/dev/null 2>&1 || true
-        ( sleep infinity | codebase-memory-mcp >/dev/null 2>&1 ) &
         socat TCP-LISTEN:9750,fork,reuseaddr TCP:127.0.0.1:9749 &
         exec "$$@"
       - --
