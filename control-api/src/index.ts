@@ -13,6 +13,7 @@ import { deleteProject, listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
 import { getWatch, listWatches, notifyPush, startWatch, stopWatch } from "./watcher.js";
+import { openApiDocument } from "./openapi.js";
 
 const PORT = Number(process.env.PORT ?? 8090);
 /**
@@ -50,6 +51,41 @@ app.options(/.*/, (_req, res) => res.sendStatus(204));
 
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", azdo: azdoStatus(), gatewayBase: GATEWAY_BASE });
+});
+
+// ── OpenAPI ─────────────────────────────────────────────────────────────────
+
+app.get("/api/openapi.json", (_req: Request, res: Response) => {
+  res.json(openApiDocument());
+});
+
+/** Uçların insan-okur özeti. Ham şema /api/openapi.json adresinde. */
+app.get("/api/docs", (_req: Request, res: Response) => {
+  res.type("html").send(`<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><title>API — graphify control-api</title>
+<style>body{font:14px/1.6 ui-sans-serif,system-ui;background:#f5f6f8;color:#1a1f2b;margin:0;padding:40px}
+main{max-width:760px;margin:0 auto}code{font-family:ui-monospace,monospace;background:#fff;border:1px solid #e2e5ea;padding:1px 5px;border-radius:4px}
+a{color:#0b4f9e}table{border-collapse:collapse;width:100%;margin-top:16px;background:#fff;border:1px solid #e2e5ea}
+td,th{border-bottom:1px solid #e2e5ea;padding:8px 10px;text-align:left;font-size:13px}
+h1{font-size:20px}</style></head>
+<body><main>
+<h1>graphify control-api</h1>
+<p>OpenAPI şeması: <a href="/api/openapi.json">/api/openapi.json</a></p>
+<p>Katalog ucu, indekslenmiş her projenin MCP adreslerini ve istatistiklerini döndürür;
+MCP sunucu envanteri gibi dış sistemler bu ucu okuyabilir.</p>
+<table>
+<tr><th>Yöntem</th><th>Yol</th><th>Ne döner</th></tr>
+<tr><td>GET</td><td><code>/api/catalog</code></td><td>Projeler, MCP adresleri, son commit</td></tr>
+<tr><td>GET</td><td><code>/api/projects</code></td><td>Ham proje listesi</td></tr>
+<tr><td>DELETE</td><td><code>/api/projects/:name</code></td><td>Grafı siler</td></tr>
+<tr><td>GET</td><td><code>/api/repos</code></td><td>İndekslenebilir repolar</td></tr>
+<tr><td>POST</td><td><code>/api/prepare</code></td><td>Kaynak kodu hazırlar</td></tr>
+<tr><td>POST</td><td><code>/api/jobs</code></td><td>İndeksleme başlatır</td></tr>
+<tr><td>GET</td><td><code>/api/jobs/:id/events</code></td><td>İlerleme (SSE)</td></tr>
+<tr><td>GET/POST/DELETE</td><td><code>/api/watch</code></td><td>Otomatik güncelleme</td></tr>
+<tr><td>POST</td><td><code>/webhooks/azdo</code></td><td>Azure DevOps push alıcısı</td></tr>
+</table>
+</main></body></html>`);
 });
 
 // ── Azure DevOps kimlik bilgisi ──────────────────────────────────────────────

@@ -132,6 +132,47 @@ secure CLI coordination could not be created (cache-private)
 `Dockerfile` bu yüzden `chmod 777` değil, `node` kullanıcısına ait `0700` veriyor.
 OpenShift'e taşırken rastgele UID nedeniyle bu kısmın gözden geçirilmesi gerekecek.
 
+## API dokümanı
+
+Katalog verisi API ile de alınabilir — MCP sunucu envanteri gibi dış sistemler
+bu ucu okuyabilir.
+
+| Adres | Ne |
+|---|---|
+| `/api/openapi.json` | OpenAPI 3.1 şeması |
+| `/api/docs` | Uçların insan-okur özeti |
+| `/api/catalog` | Projeler, MCP adresleri, istatistikler, son commit |
+
+### Dockerfile ile tek tek
+
+`docker compose` kullanmadan da kurulabilir:
+
+```bash
+docker build -t graphify/platform .
+docker build -t graphify/web ./web
+docker network create graphify-net
+docker volume create cbm-data && docker volume create repos
+
+docker run -d --name gateway --network graphify-net --network-alias gateway \
+  -p 8099:8099 -p 9749:9750 \
+  -e GATEWAY_AUTH=none -e CBM_ALLOWED_ROOT=/data/repos \
+  -v cbm-data:/data/cbm -v repos:/data/repos \
+  --entrypoint /bin/sh graphify/platform -c \
+  'codebase-memory-mcp --ui=true --port=9749 </dev/null >/dev/null 2>&1 || true;
+   socat TCP-LISTEN:9750,fork,reuseaddr TCP:127.0.0.1:9749 &
+   exec node gateway/dist/index.js'
+
+docker run -d --name control-api --network graphify-net --network-alias control-api \
+  -e GATEWAY_INTERNAL_URL=http://gateway:8099 \
+  -v cbm-data:/data/cbm -v repos:/data/repos \
+  graphify/platform node control-api/dist/index.js
+
+docker run -d --name web --network graphify-net -p 5180:80 graphify/web
+```
+
+Ağ takma adları önemli: nginx `/api` isteklerini `control-api` adına, control-api
+de gateway'e `gateway` adıyla ulaşıyor.
+
 ## Yerel çalıştırma (Docker'sız)
 
 Üçünü ayrı terminallerde:
