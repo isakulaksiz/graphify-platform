@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { gitAuthArgs } from "./azdo.js";
 import type { RepoSummary } from "./types.js";
 
 /** Klonların tutulduğu kök dizin. */
-const CLONE_ROOT = resolve(
+export const CLONE_ROOT = resolve(
   process.env.CLONE_ROOT ?? join(homedir(), ".cache", "graphify", "repos"),
 );
 
@@ -138,6 +138,61 @@ export async function prepareRepo(
   const head = await git(["rev-parse", "HEAD"], target);
   onLog(`Hazır: ${branch} @ ${head.stdout.slice(0, 10)}`);
   return { repoPath: target, action, sha: head.stdout };
+}
+
+/**
+ * Bu yol bizim açtığımız bir klon mu.
+ *
+ * Ayrım güvenlik için: yönetilen klonlarda `checkout -f` ile yerel değişikliği
+ * atmakta sakınca yok, orayı yalnızca biz yazıyoruz. Kullanıcının kendi yerel
+ * reposunda aynı şey commit edilmemiş çalışmasını silerdi.
+ */
+export function isManagedClone(repoPath: string): boolean {
+  const path = resolve(repoPath);
+  return path === CLONE_ROOT || path.startsWith(`${CLONE_ROOT}${sep}`);
+}
+
+/** Çalışma kopyasının o an üzerinde bulunduğu dal. */
+export async function currentBranch(repoPath: string): Promise<string | null> {
+  const result = await git(["rev-parse", "--abbrev-ref", "HEAD"], repoPath).catch(() => null);
+  if (!result || result.code !== 0 || !result.stdout || result.stdout === "HEAD") return null;
+  return result.stdout;
+}
+
+/**
+ * Çalışma kopyasını dalın son commit'ine getirir ve yeni sha'yı döndürür.
+ *
+ * OTOMATİK GÜNCELLEMENİN EKSİK ADIMI BUYDU: `fetch` yalnızca `origin/<dal>`
+ * referansını ilerletir, çalışma kopyası eski commit'te kalır. Bu adım
+ * olmadan CBM her tetiklemede AYNI eski dosyaları yeniden indeksliyor,
+ * iş "başarılı" görünüyor ama graf hiç değişmiyordu.
+ *
+ * Yerel repolarda çalışma kopyasına dokunulmaz; ne varsa o indekslenir.
+ */
+export async function syncWorkingTree(
+  repoPath: string,
+  branch: string,
+  onLog: (line: string) => void = () => undefined,
+): Promise<string | null> {
+  if (!isManagedClone(repoPath)) {
+    onLog(`Yerel repo — çalışma kopyasına dokunulmuyor (${repoPath}).`);
+    return null;
+  }
+
+  const fetched = await git([...gitAuthArgs(), "fetch", "--prune", "origin", branch], repoPath);
+  if (fetched.code !== 0) {
+    throw new Error(`'${branch}' için fetch başarısız: ${fetched.stderr || "bilinmeyen hata"}`);
+  }
+
+  // -f: yönetilen klonda yerel değişiklik olmamalı; olduysa dalın hali kazanır.
+  const checkout = await git(["checkout", "-f", "-B", branch, `origin/${branch}`], repoPath);
+  if (checkout.code !== 0) {
+    throw new Error(`'${branch}' dalına geçilemedi: ${checkout.stderr || "bilinmeyen hata"}`);
+  }
+
+  const head = await git(["rev-parse", "HEAD"], repoPath);
+  onLog(`Çalışma kopyası güncellendi: ${branch} @ ${head.stdout.slice(0, 10)}`);
+  return head.stdout || null;
 }
 
 /** Yerel bir reponun dallarını listeler. */

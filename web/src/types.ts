@@ -109,7 +109,10 @@ export interface CatalogEntry {
   displayName: string;
   lastCommit: CommitInfo | null;
   rootPath: string;
+  /** Grafın çıkarıldığı dal. */
   branch?: string;
+  /** Son indekslemenin zamanı — kalıcı kayıttan gelir. */
+  indexedAt?: string;
   nodes: number;
   edges: number;
   sizeBytes: number;

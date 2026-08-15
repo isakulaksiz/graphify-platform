@@ -89,15 +89,30 @@ function ProjectCard({
               <span className="text-gray-300">{entry.edges.toLocaleString("tr-TR")}</span> edge
             </span>
             <span>{formatSize(entry.sizeBytes)}</span>
-            {entry.branch && <span className="font-mono">{entry.branch}</span>}
+            {entry.branch && (
+              <span>
+                dal <span className="font-mono text-gray-300">{entry.branch}</span>
+              </span>
+            )}
             {entry.autoUpdate.enabled ? (
               <span className="flex items-center gap-1 text-emerald-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                otomatik güncelleme açık
+                otomatik güncelleme · <span className="font-mono">{entry.autoUpdate.branch}</span>
               </span>
             ) : (
               <span className="text-gray-600">otomatik güncelleme kapalı</span>
             )}
+            {/* İndekslenen dal ile izlenen dal ayrışırsa graf yanlış koddan
+                güncellenir — sessiz kalmasın. */}
+            {entry.autoUpdate.enabled &&
+              entry.branch &&
+              entry.autoUpdate.branch &&
+              entry.autoUpdate.branch !== entry.branch && (
+                <span className="text-amber-400">
+                  indekslenen dal <span className="font-mono">{entry.branch}</span> ile izlenen dal
+                  farklı
+                </span>
+              )}
           </p>
         </div>
 

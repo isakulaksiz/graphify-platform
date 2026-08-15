@@ -8,11 +8,26 @@ import {
   listRepos,
   setCredentials,
 } from "./azdo.js";
-import { clonePathFor, displayName, lastCommit, localBranches, prepareRepo } from "./clone.js";
+import {
+  clonePathFor,
+  currentBranch,
+  displayName,
+  lastCommit,
+  localBranches,
+  prepareRepo,
+} from "./clone.js";
 import { deleteProject, listProjects, recoverDaemon } from "./cbm.js";
 import { createJob, getJob } from "./jobs.js";
+import { forgetRecord, getRecord, recordIndex, stateFilePath } from "./state.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
-import { getWatch, listWatches, notifyPush, startWatch, stopWatch } from "./watcher.js";
+import {
+  getWatch,
+  listWatches,
+  notifyPush,
+  restoreWatches,
+  startWatch,
+  stopWatch,
+} from "./watcher.js";
 import { openApiDocument } from "./openapi.js";
 
 const PORT = Number(process.env.PORT ?? 8090);
@@ -123,16 +138,23 @@ app.delete("/api/azdo", (_req: Request, res: Response) => {
   res.json(azdoStatus());
 });
 
-/** Yerel diskte duran, indekslenebilir repoları toplar. */
-function localRepos(): RepoSummary[] {
+/**
+ * Yerel diskte duran, indekslenebilir repoları toplar.
+ *
+ * Varsayılan dal repodan okunuyor; sabit 'master' yazmak `main` kullanan bir
+ * repoda kapsam adımına var olmayan bir dal önerirdi.
+ */
+async function localRepos(): Promise<RepoSummary[]> {
   const found: RepoSummary[] = [];
   for (const root of LOCAL_ROOTS) {
     const path = resolve(root);
     if (!existsSync(path) || !statSync(path).isDirectory()) continue;
+
+    const head = await currentBranch(path).catch(() => null);
     found.push({
       id: `local:${path}`,
       name: path.split("/").at(-1) ?? path,
-      defaultBranch: "master",
+      defaultBranch: head ?? "main",
       localPath: path,
       source: "local",
     });
@@ -146,7 +168,7 @@ async function allRepos(): Promise<RepoSummary[]> {
     console.error("[repos] Azure DevOps listesi alınamadı:", String(error));
     return [] as RepoSummary[];
   });
-  return [...localRepos(), ...azure];
+  return [...(await localRepos()), ...azure];
 }
 
 async function findRepo(id: string): Promise<RepoSummary | undefined> {
@@ -239,12 +261,16 @@ app.get("/api/catalog", async (_req: Request, res: Response) => {
     const entries = await Promise.all(projects.map(async (p) => {
       const watch = watches.find((w) => w.repoPath === p.rootPath);
       const commit = await lastCommit(p.rootPath).catch(() => null);
+      // Dal sırayla: indeksleme kaydı → CBM → çalışma kopyasının hâli.
+      const record = getRecord(p.rootPath);
+      const branch = record?.branch ?? p.branch ?? (await currentBranch(p.rootPath).catch(() => null));
       return {
         project: p.name,
         displayName: displayName(p.rootPath),
         lastCommit: commit,
         rootPath: p.rootPath,
-        branch: p.branch,
+        branch: branch ?? undefined,
+        indexedAt: record?.indexedAt,
         nodes: p.nodes,
         edges: p.edges,
         sizeBytes: p.sizeBytes,
@@ -278,8 +304,22 @@ app.get("/api/catalog", async (_req: Request, res: Response) => {
 app.delete("/api/projects/:name", async (req: Request, res: Response) => {
   const project = String(req.params.name);
   try {
-    const watch = listWatches().find((w) => w.repoName === project || w.repoPath.endsWith(project));
+    /**
+     * İzlemeyi KÖK YOL üzerinden buluyoruz.
+     *
+     * Eskiden CBM'in proje adı (`data-repos-X-Y-abc123`) ile izlemenin
+     * repoName/repoPath alanları karşılaştırılıyordu; bunlar hiçbir zaman
+     * eşleşmiyordu. Sonuç: silinen bir proje otomatik güncelleme açıksa bir
+     * sonraki push'ta kendiliğinden geri geliyordu.
+     */
+    const rootPath =
+      (await listProjects().catch(() => [])).find((p) => p.name === project)?.rootPath ?? "";
+    const watch = rootPath
+      ? listWatches().find((w) => w.repoPath === rootPath)
+      : listWatches().find((w) => w.repoName === project);
+
     if (watch) stopWatch(watch.repoPath);
+    if (rootPath) forgetRecord(rootPath);
 
     await deleteProject(project);
     console.info(`[katalog] proje silindi: ${project}${watch ? " (izleme de durduruldu)" : ""}`);
@@ -323,6 +363,16 @@ app.post("/api/prepare", async (req: Request, res: Response) => {
     const prepared = await prepareRepo(repo, branch, (line) => logs.push(line));
     const path = prepared.repoPath;
 
+    // Seçilen dalı burada kalıcı hale getiriyoruz: indeksleme ve otomatik
+    // güncelleme bundan sonra bu dalı esas alır.
+    recordIndex({
+      repoPath: path,
+      repoName: repo.name,
+      branch,
+      repoId: repo.id,
+      sha: prepared.sha,
+    });
+
     const checks = [
       { name: "Kaynak kod hazır", ok: existsSync(path) && statSync(path).isDirectory() },
       { name: "Git reposu", ok: existsSync(resolve(path, ".git")) },
@@ -356,7 +406,13 @@ app.post("/api/jobs", (req: Request, res: Response) => {
     res.status(400).json({ error: "Geçerli bir repoPath gerekli." });
     return;
   }
-  const job = createJob(resolve(repoPath), repoName);
+  const path = resolve(repoPath);
+  // Doğrudan bu uca gelen çağrılarda da dal kaydı düşülsün.
+  const branch =
+    (typeof req.body?.branch === "string" && req.body.branch) || getRecord(path)?.branch;
+  if (branch) recordIndex({ repoPath: path, repoName, branch });
+
+  const job = createJob(path, repoName);
   res.status(202).json({ jobId: job.id, state: job.state });
 });
 
@@ -472,16 +528,34 @@ app.get("/api/watch", (_req: Request, res: Response) => {
 });
 
 /** Bir repoyu izlemeye alır: dal değişince graf kendiliğinden güncellenir. */
-app.post("/api/watch", (req: Request, res: Response) => {
+app.post("/api/watch", async (req: Request, res: Response) => {
   const repoPath = typeof req.body?.repoPath === "string" ? req.body.repoPath : "";
   const repoName = typeof req.body?.repoName === "string" ? req.body.repoName : repoPath;
-  const branch = typeof req.body?.branch === "string" ? req.body.branch : "master";
 
   if (!repoPath || !existsSync(resolve(repoPath))) {
     res.status(400).json({ error: "Geçerli bir repoPath gerekli." });
     return;
   }
-  res.json(startWatch(resolve(repoPath), repoName, branch));
+
+  const path = resolve(repoPath);
+  /**
+   * Dal sırasıyla: istekten → indeksleme kaydından → çalışma kopyasının
+   * bulunduğu daldan. Eskiden burada 'master' sabiti vardı; kapsam adımında
+   * başka bir dal seçilmiş olsa bile izleme master'a bakıyordu.
+   */
+  const branch =
+    (typeof req.body?.branch === "string" && req.body.branch) ||
+    getRecord(path)?.branch ||
+    (await currentBranch(path).catch(() => null));
+
+  if (!branch) {
+    res.status(400).json({
+      error: "İzlenecek dal belirlenemedi. Önce hazırlık adımını çalıştırın veya branch gönderin.",
+    });
+    return;
+  }
+
+  res.json(startWatch(path, repoName, branch));
 });
 
 app.delete("/api/watch", (req: Request, res: Response) => {
@@ -548,4 +622,9 @@ app.listen(PORT, () => {
   console.info(`[control-api] dinlemede http://localhost:${PORT}`);
   console.info(`[control-api] gateway: ${GATEWAY_BASE}`);
   console.info(`[control-api] azure devops: ${JSON.stringify(azdoStatus())}`);
+  console.info(`[control-api] durum dosyası: ${stateFilePath()}`);
+
+  // Açık bırakılmış izlemeleri geri kur — yeniden başlatma otomatik
+  // güncellemeyi sessizce kapatmasın.
+  restoreWatches();
 });

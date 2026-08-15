@@ -1,6 +1,9 @@
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { gitAuthArgs } from "./azdo.js";
+import { syncWorkingTree } from "./clone.js";
 import { createJob } from "./jobs.js";
+import { listRecords, recordIndex, setAutoUpdate } from "./state.js";
 
 /** Git HEAD kontrol sıklığı. */
 const POLL_MS = Number(process.env.WATCH_POLL_MS ?? 15_000);
@@ -75,16 +78,46 @@ async function currentSha(repoPath: string, branch: string): Promise<string> {
 function scheduleIndex(watch: Watch, sha: string, source: "poll" | "webhook"): void {
   if (watch.debounceTimer) clearTimeout(watch.debounceTimer);
   watch.pending = true;
+  watch.debounceTimer = setTimeout(() => void runIndex(watch, sha, source), DEBOUNCE_MS);
+}
 
-  watch.debounceTimer = setTimeout(() => {
-    watch.pending = false;
-    watch.lastSha = sha;
-    watch.lastTrigger = { at: new Date().toISOString(), sha, source };
+/**
+ * Çalışma kopyasını güncelleyip indekslemeyi kuyruğa alır.
+ *
+ * Sıra kritik: önce `syncWorkingTree`, sonra `createJob`. Bu adım eksikken
+ * fetch yalnızca `origin/<dal>` referansını ilerletiyor, CBM ise diskteki
+ * ESKİ dosyaları yeniden indeksliyordu — iş başarılı görünüyor, graf
+ * değişmiyordu.
+ *
+ * Hata durumunda `lastSha` ilerletilmiyor: aksi halde başarısız tek bir
+ * denemeden sonra o commit bir daha hiç denenmezdi.
+ */
+async function runIndex(watch: Watch, sha: string, source: "poll" | "webhook"): Promise<void> {
+  watch.pending = false;
+  try {
+    const head = await syncWorkingTree(watch.repoPath, watch.branch, (line) =>
+      console.info(`[watch] ${line}`),
+    );
+    const indexed = head ?? sha;
+
+    watch.lastSha = indexed;
+    watch.lastError = undefined;
+    watch.lastTrigger = { at: new Date().toISOString(), sha: indexed, source };
+    recordIndex({
+      repoPath: watch.repoPath,
+      repoName: watch.repoName,
+      branch: watch.branch,
+      sha: indexed,
+    });
+
     console.info(
-      `[watch] ${watch.repoName} @ ${sha.slice(0, 8)} (${source}) — indeksleme kuyruğa alındı`,
+      `[watch] ${watch.repoName} (${watch.branch}) @ ${indexed.slice(0, 8)} (${source}) — indeksleme kuyruğa alındı`,
     );
     createJob(watch.repoPath, watch.repoName);
-  }, DEBOUNCE_MS);
+  } catch (error) {
+    watch.lastError = String(error instanceof Error ? error.message : error);
+    console.error(`[watch] ${watch.repoName} güncellenemedi: ${watch.lastError}`);
+  }
 }
 
 async function poll(watch: Watch): Promise<void> {
@@ -107,26 +140,57 @@ async function poll(watch: Watch): Promise<void> {
 }
 
 export function startWatch(repoPath: string, repoName: string, branch: string): WatchState {
-  stopWatch(repoPath);
+  if (!branch) throw new Error("İzleme için dal adı zorunlu.");
+  stopWatch(repoPath, { persist: false });
 
   const watch: Watch = { repoPath, repoName, branch, lastSha: null, pending: false };
   watch.timer = setInterval(() => void poll(watch), POLL_MS);
   watch.timer.unref();
 
   watches.set(repoPath, watch);
+  // İndeksleme kaydı yoksa oluştur; varsa dalı izlenen dala hizala.
+  recordIndex({ repoPath, repoName, branch });
+  setAutoUpdate(repoPath, true, branch);
+
   void poll(watch);
   console.info(`[watch] izleme başladı: ${repoName} (${branch}), her ${POLL_MS / 1000} sn`);
   return toState(watch);
 }
 
-export function stopWatch(repoPath: string): boolean {
+export function stopWatch(repoPath: string, options: { persist?: boolean } = {}): boolean {
   const watch = watches.get(repoPath);
   if (!watch) return false;
+
   clearInterval(watch.timer);
   if (watch.debounceTimer) clearTimeout(watch.debounceTimer);
   watches.delete(repoPath);
+  // Yeniden başlatmadaki geçici durdurmada kaydı bozma.
+  if (options.persist !== false) setAutoUpdate(repoPath, false);
+
   console.info(`[watch] izleme durdu: ${watch.repoName}`);
   return true;
+}
+
+/**
+ * Servis açılışında izlemeleri geri kurar.
+ *
+ * İzlemeler yalnızca bellekte tutulduğu için konteyner her yeniden
+ * başladığında otomatik güncelleme sessizce kapanıyordu; arayüzde "açık"
+ * görünüp aslında çalışmaması en kötü hâliydi.
+ */
+export function restoreWatches(): number {
+  let restored = 0;
+  for (const record of listRecords()) {
+    if (!record.autoUpdate || !record.branch) continue;
+    if (!existsSync(record.repoPath)) {
+      console.warn(`[watch] kayıt atlandı, yol yok: ${record.repoPath}`);
+      continue;
+    }
+    startWatch(record.repoPath, record.repoName, record.branch);
+    restored += 1;
+  }
+  if (restored > 0) console.info(`[watch] ${restored} izleme geri kuruldu.`);
+  return restored;
 }
 
 function toState(watch: Watch): WatchState {
