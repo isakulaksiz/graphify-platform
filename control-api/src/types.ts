@@ -13,7 +13,27 @@ export interface RepoSummary {
   localPath?: string;
   source: "azure-devops" | "local";
   /** Bu repo daha önce indekslendiyse CBM'deki proje adı. */
+  /**
+   * İlk indekslenmiş kaydın CBM proje adı.
+   *
+   * Geriye dönük uyumluluk için duruyor; birden çok kapsam olabildiği için
+   * arayıza `indexed` listesi verildi.
+   */
   indexedAs?: string;
+  /** Bu repodan çıkarılmış tüm grafları — kapsam başına bir kayıt. */
+  indexed?: IndexedEntry[];
+}
+
+/** Bir repodan çıkarılmış tek graf. */
+export interface IndexedEntry {
+  /** CBM proje adı — silme ve endpoint çağrıları bunu kullanır. */
+  project: string;
+  /** Kaynak kodun diskteki yolu. */
+  rootPath: string;
+  /** İndekslenen klasör kapsamı; boş = tüm repo. */
+  folders: string[];
+  nodes: number;
+  edges: number;
 }
 
 export interface IndexedProject {

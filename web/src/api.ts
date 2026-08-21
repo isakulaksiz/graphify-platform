@@ -4,6 +4,7 @@ import type {
   CatalogResponse,
   CbmUiStatus,
   EndpointInfo,
+  FolderList,
   JobEvent,
   PrecheckResult,
   RepoSummary,
@@ -34,14 +35,31 @@ export function fetchBranches(repoId: string): Promise<BranchList> {
  * Kaynak kodu hazırlar (gerekiyorsa klonlar/günceller) ve uygunluğunu doğrular.
  * Kaynak kod yolu burada türetilir — kullanıcıdan istenmez.
  */
-export function prepareRepo(repoId: string, branch: string): Promise<PrecheckResult> {
-  return json("/api/prepare", { method: "POST", body: JSON.stringify({ repoId, branch }) });
+export function prepareRepo(
+  repoId: string,
+  branch: string,
+  folders: string[] = [],
+): Promise<PrecheckResult> {
+  return json("/api/prepare", {
+    method: "POST",
+    body: JSON.stringify({ repoId, branch, folders }),
+  });
 }
 
-export function startJob(repoPath: string, repoName: string): Promise<{ jobId: string }> {
+/** Bir dalın klasörlerini listeler — indeksleme kapsamı seçimi için. */
+export function fetchFolders(repoId: string, branch: string, path = ""): Promise<FolderList> {
+  const query = new URLSearchParams({ branch, ...(path ? { path } : {}) });
+  return json(`/api/repos/${encodeURIComponent(repoId)}/folders?${query.toString()}`);
+}
+
+export function startJob(
+  repoPath: string,
+  repoName: string,
+  options: { branch?: string } = {},
+): Promise<{ jobId: string }> {
   return json("/api/jobs", {
     method: "POST",
-    body: JSON.stringify({ repoPath, repoName }),
+    body: JSON.stringify({ repoPath, repoName, ...options }),
   });
 }
 

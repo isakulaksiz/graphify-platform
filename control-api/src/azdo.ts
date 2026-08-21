@@ -144,6 +144,51 @@ export async function listRepos(): Promise<RepoSummary[]> {
  *
  * GET {taban}/{org}/_apis/git/repositories/{repositoryId}/refs?filter=heads
  */
+/**
+ * Bir daldaki klasörleri Azure DevOps üzerinden listeler — klon gerekmez.
+ *
+ * Büyük monorepo'da klasör seçimi için tam klonu beklemek anlamsız; bu uç
+ * yalnızca ağaç bilgisini okuyor. `OneLevel` bilerek seçildi: `Full` yüz
+ * binlerce girdilik yanıt üretebilir.
+ *
+ * KISIT: bu yol dosya sayısı vermiyor (OneLevel yalnızca bir seviye döner).
+ * Yerel klon varsa sayımlar oradan okunuyor.
+ */
+export async function listFolderItems(
+  repositoryId: string,
+  branch: string,
+  path = "",
+): Promise<string[]> {
+  if (!runtimeOrg || !runtimePat) return [];
+
+  const scope = path ? `/${path.replace(/^\/+/, "")}` : "/";
+  const url =
+    `${apiRoot()}/_apis/git/repositories/${repositoryId}/items` +
+    `?scopePath=${encodeURIComponent(scope)}` +
+    `&recursionLevel=OneLevel` +
+    `&versionDescriptor.versionType=branch` +
+    `&versionDescriptor.version=${encodeURIComponent(branch)}` +
+    `&api-version=${API_VERSION}`;
+
+  const response = await fetch(url, {
+    headers: { Authorization: authHeader(), Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`Klasör listesi alınamadı: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as {
+    value?: Array<{ path?: string; isFolder?: boolean; gitObjectType?: string }>;
+  };
+
+  return (payload.value ?? [])
+    .filter((item) => item.isFolder === true || item.gitObjectType === "tree")
+    .map((item) => String(item.path ?? "").replace(/^\/+/, ""))
+    // Kapsamın kendisi de yanıtta dönüyor; onu eliyoruz.
+    .filter((folder) => Boolean(folder) && folder !== path.replace(/^\/+/, ""))
+    .sort();
+}
+
 export async function listBranches(repositoryId: string): Promise<string[]> {
   if (!runtimeOrg || !runtimePat) return [];
 

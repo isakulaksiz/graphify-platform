@@ -94,6 +94,18 @@ function ProjectCard({
                 dal <span className="font-mono text-gray-300">{entry.branch}</span>
               </span>
             )}
+            {/* Kapsam daraltılmışsa görünmeli: grafta neden bazı klasörlerin
+                olmadığı buradan anlaşılıyor. */}
+            {entry.folders && entry.folders.length > 0 && (
+              <span title={entry.folders.join(", ")}>
+                kapsam{" "}
+                <span className="font-mono text-gray-300">
+                  {entry.folders.length === 1
+                    ? entry.folders[0]
+                    : `${entry.folders[0]} +${entry.folders.length - 1}`}
+                </span>
+              </span>
+            )}
             {entry.autoUpdate.enabled ? (
               <span className="flex items-center gap-1 text-emerald-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -102,6 +114,26 @@ function ProjectCard({
             ) : (
               <span className="text-gray-600">otomatik güncelleme kapalı</span>
             )}
+            {/* Grafın gerçekten yenilendiğini gösteren tek bilgi.
+                Bu olmadan başarısız bir indekslemeden sonra kart YENİ commit'i
+                ESKİ grafla gösteriyor ve güncellenmiş gibi görünüyordu. */}
+            {entry.autoUpdate.lastIndex &&
+              (entry.autoUpdate.lastIndex.state === "succeeded" ? (
+                <span className="text-gray-400">
+                  graf yenilendi {relativeDate(entry.autoUpdate.lastIndex.at)}
+                  {entry.autoUpdate.lastIndex.nodes !== undefined && (
+                    <> · {entry.autoUpdate.lastIndex.nodes} node</>
+                  )}
+                </span>
+              ) : (
+                <span
+                  className="text-red-300"
+                  title={entry.autoUpdate.lastIndex.error ?? "bilinmeyen hata"}
+                >
+                  son indeksleme BAŞARISIZ ({relativeDate(entry.autoUpdate.lastIndex.at)}) — graf
+                  eski koddan
+                </span>
+              ))}
             {/* İndekslenen dal ile izlenen dal ayrışırsa graf yanlış koddan
                 güncellenir — sessiz kalmasın. */}
             {entry.autoUpdate.enabled &&
@@ -243,6 +275,18 @@ export function CatalogView() {
   }, []);
 
   useEffect(() => load(), [load]);
+
+  /**
+   * Kataloğu düzenli tazele.
+   *
+   * Sayfa yalnızca açılışta yükleniyordu. Otomatik güncelleme arka planda
+   * grafı yenilediğinde açık duran katalog eski veriyi göstermeye devam
+   * ediyordu; kullanıcı "değişiklik görünmüyor" diye bakıyordu.
+   */
+  useEffect(() => {
+    const timer = setInterval(load, 20_000);
+    return () => clearInterval(timer);
+  }, [load]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();

@@ -146,6 +146,11 @@ export interface IndexHandle {
  *
  * `cli` modu daemon başlatmaz — webhook/CI tetiklemesi için tasarlanmış yol budur.
  * `--progress` stderr'e ilerleme yazdırır; stdout yalnızca sonuç JSON'u içerir.
+ *
+ * `--mode` GEÇİLMİYOR: indeksleme her zaman CBM'in tam modunda çalışıyor.
+ * moderate/fast modları benzerlik ve anlamsal kenarları atlayarak süreyi
+ * kısaltıyor ama grafı zayıflatıyor; kapsam daraltmak (sparse-checkout) aynı
+ * kazancı graf kalitesinden ödün vermeden veriyor.
  */
 export function indexRepository(
   repoPath: string,
@@ -202,17 +207,118 @@ export function indexRepository(
 }
 
 /**
+ * CBM'in takıldığını gösteren imzalar.
+ *
+ * Bu durumlarda komut kendi başına bir daha denese de düzelmiyor; daemon'ın
+ * temizlenmesi gerekiyor.
+ */
+const WEDGED = /daemon could not accept this client|pre-coordination|unverified CBM generation|secure CLI coordination/i;
+
+/** CBM'in gürültülü günlük satırlarını atıp okunabilir bir teşhis bırakır. */
+function meaningfulOutput(...streams: string[]): string {
+  return streams
+    .join("\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line &&
+        !line.startsWith("level=info") &&
+        !line.startsWith("hint:") &&
+        !line.startsWith("Preparing") &&
+        !line.startsWith("Running"),
+    )
+    .join(" | ")
+    .slice(-400);
+}
+
+interface DeleteAttempt {
+  ok: boolean;
+  status: string;
+  detail: string;
+}
+
+/** Çıktıdaki JSON gövdesinin `status` alanı; yoksa null. */
+function reportedStatus(...streams: string[]): string | null {
+  for (const stream of streams) {
+    for (const line of stream.trim().split("\n").reverse()) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as { status?: unknown };
+        if (typeof parsed.status === "string") return parsed.status;
+      } catch {
+        // Bu satır JSON değil; öncekilere bak.
+      }
+    }
+  }
+  return null;
+}
+
+async function attemptDelete(project: string): Promise<DeleteAttempt> {
+  const { stdout, stderr, code } = await runCbm(["cli", "delete_project", "--project", project]);
+  const status = reportedStatus(stdout, stderr);
+
+  /**
+   * `not_found` başarı sayılıyor — ÇIKIŞ KODU NE OLURSA OLSUN.
+   *
+   * CBM bu durumu tutarsız raporluyor: bazı çağrılarda 0, bazılarında 1 kodu
+   * ile ama her ikisinde de `{"status":"not_found"}` gövdesiyle dönüyor.
+   * Kodu esas alan bir kontrol, zaten silinmiş bir grafı ikinci kez silmeye
+   * çalışan kullanıcıya "500 Internal Server Error" gösteriyordu. Silme
+   * işlemi tekrarlanabilir olmalı.
+   */
+  if (code === 0 || status === "not_found") {
+    invalidateProjectCache();
+    return { ok: true, status: status ?? "deleted", detail: "" };
+  }
+
+  // CBM teşhisi STDERR'e yazıyor. Eskiden yalnızca stdout raporlanıyordu ve
+  // hata mesajı "delete_project 1 koduyla çıktı: " diye bomboş çıkıyordu.
+  return { ok: false, status: "", detail: meaningfulOutput(stderr, stdout) };
+}
+
+export interface DeleteResult {
+  status: string;
+  /** Daemon temizlendikten sonra mı başarılı oldu. */
+  recovered: boolean;
+}
+
+/**
  * Bir projenin grafını siler.
  *
- * CBM'in kendi `delete_project` aracını kullanıyoruz — veritabanı dosyasını
- * elle silmek daemon'ın açık tuttuğu bağlantılarla çakışır.
+ * Olmayan proje hata değil: CBM 0 kodu ve `status: "not_found"` döndürüyor,
+ * biz de bunu başarı sayıyoruz — silme çağrısı tekrarlanabilir olmalı.
+ *
+ * Takılı daemon imzası görülürse ve `allowRecovery` açıksa daemon temizlenip
+ * bir kez daha denenir. Çağıran, çalışan indeksleme varken bunu KAPATMAK
+ * zorunda: kurtarma `pkill` ile bütün CBM süreçlerini öldürüyor, o indeksleme
+ * de giderdi. Kararı çağırana bırakmak cbm.ts ↔ jobs.ts dairesel bağımlılığını
+ * da ortadan kaldırıyor.
  */
-export async function deleteProject(project: string): Promise<void> {
-  const { stdout, code } = await runCbm(["cli", "delete_project", "--project", project]);
-  if (code !== 0) {
-    throw new Error(`delete_project ${code} koduyla çıktı: ${stdout.slice(-200)}`);
+export async function deleteProject(
+  project: string,
+  options: { allowRecovery?: boolean } = {},
+): Promise<DeleteResult> {
+  const first = await attemptDelete(project);
+  if (first.ok) return { status: first.status, recovered: false };
+
+  if (!WEDGED.test(first.detail)) {
+    throw new Error(first.detail || "CBM bir açıklama vermeden başarısız oldu.");
   }
-  invalidateProjectCache();
+  if (options.allowRecovery === false) {
+    throw new Error(
+      `${first.detail} — CBM takılmış görünüyor ama şu anda bir indeksleme sürüyor. ` +
+        "Daemon'ı temizlemek o işi de öldüreceği için otomatik denemedik; iş bitince tekrar deneyin.",
+    );
+  }
+
+  console.warn(`[cbm] delete_project takıldı, daemon temizleniyor: ${first.detail}`);
+  await recoverDaemon();
+
+  const second = await attemptDelete(project);
+  if (second.ok) return { status: second.status, recovered: true };
+  throw new Error(`Daemon temizlendikten sonra da silinemedi: ${second.detail}`);
 }
 
 /** Takılı daemon'ı kurtarır — bkz. gateway/README.md "Daemon kurtarma". */

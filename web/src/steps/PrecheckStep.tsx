@@ -41,8 +41,28 @@ export function PrecheckStep({
               {result.sha && (
                 <p className="mt-1 font-mono text-xs text-gray-500">
                   HEAD {result.sha.slice(0, 10)}
+                  {result.fileCount > 0 && ` · ${result.fileCount} dosya`}
                 </p>
               )}
+              {/* Kapsam burada teyit ediliyor: seçim gerçekten uygulandı mı,
+                  diske kaç dosya indi. */}
+              <p className="mt-2 text-xs text-gray-400">
+                {result.folders.length === 0 ? (
+                  "Kapsam: tüm repo"
+                ) : (
+                  <>
+                    Kapsam:{" "}
+                    {result.folders.map((folder) => (
+                      <span
+                        key={folder}
+                        className="mr-1 inline-block rounded bg-[var(--color-panel)] px-1.5 py-0.5 font-mono text-[11px] text-gray-300"
+                      >
+                        {folder}
+                      </span>
+                    ))}
+                  </>
+                )}
+              </p>
             </div>
             <ul className="space-y-2">
               {result.checks.map((check) => (

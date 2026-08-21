@@ -2,6 +2,76 @@ import { useEffect, useRef, useState } from "react";
 import { Callout, Panel, Stat } from "../components/ui";
 import type { CbmUiStatus, IndexResult, JobState } from "../types";
 
+/**
+ * Başarısızlığın nedenini log'dan teşhis eder.
+ *
+ * Eskiden tek bir genel ipucu vardı ve takılı daemon'ı işaret ediyordu. Büyük
+ * repolarda gerçek neden bambaşka çıkıyor — worker'ın bellek yüzünden
+ * öldürülmesi — ve kullanıcı yanlış çözümü deniyordu.
+ */
+function FailureHint({ logs }: { logs: string[] }) {
+  const text = logs.join("\n");
+
+  // signal=9 (SIGKILL): worker bellek bütçesini aştığı için öldürüldü.
+  if (/signal=9|killed \(exit=-1/.test(text)) {
+    return (
+      <Callout tone="error" title="İndeksleme başarısız — worker bellek yüzünden öldürüldü">
+        <p>
+          Log'da <code className="font-mono">killed (exit=-1, signal=9)</code> var. CBM bellek
+          bütçesini worker sayısına bölüyor; pay bir dosyayı işlemeye yetmediğinde worker'ı
+          öldürüyor. Takılı daemon değil — kurtarma düğmesi bu durumda işe yaramaz.
+        </p>
+        <p className="mt-2">Sırasıyla deneyin:</p>
+        <ol className="mt-1 list-decimal space-y-1 pl-5">
+          <li>
+            <strong>Kapsamı daraltın.</strong> Kapsam adımında yalnızca gereken klasörleri
+            seçin — kapsam dışı dosyalar diske hiç inmediği için işlenmiyor da.
+          </li>
+          <li>
+            <strong>Bellek bütçesini yükseltin.</strong> <code>CBM_MEM_BUDGET_MB</code>{" "}
+            tanımlıysa kaldırın: CBM RAM'in ~%25'ini kendisi seçer. Elle vermek isterseniz
+            makinenin RAM'ine göre yükseltin.
+          </li>
+          <li>
+            <strong>Tek iş parçacığı.</strong> <code>CBM_INDEX_SINGLE_THREAD=1</code> ile tüm
+            bütçe tek worker'a gider; yavaşlar ama biter.
+          </li>
+          <li>
+            <strong>Dev dosyaları eleyin.</strong> Üretilmiş tek bir büyük dosya bir worker'ı
+            tek başına şişirebilir: <code>CBM_MAX_FILE_BYTES=2000000</code>.
+          </li>
+        </ol>
+      </Callout>
+    );
+  }
+
+  if (/daemon could not accept this client/.test(text)) {
+    return (
+      <Callout tone="error" title="İndeksleme başarısız — takılı CBM daemon'ı">
+        Daemon istemciyi 30 saniyede kabul edemedi. Aşağıdaki kurtarma düğmesi kalan CBM
+        süreçlerini temizler.
+      </Callout>
+    );
+  }
+
+  if (/pre-coordination or unverified CBM generation/.test(text)) {
+    return (
+      <Callout tone="error" title="İndeksleme başarısız — CBM sürüm kohortu uyuşmuyor">
+        Bu durum konteynerin yazılabilir katmanındaki durumdan kaynaklanıyor;{" "}
+        <code>docker compose restart</code> yetmez,{" "}
+        <code>docker compose up -d --force-recreate</code> gerekir. Graf kaybolmaz.
+      </Callout>
+    );
+  }
+
+  return (
+    <Callout tone="error" title="İndeksleme başarısız">
+      Log'un sonuna bakın. Takılı bir CBM daemon'ı söz konusuysa aşağıdaki kurtarma düğmesini
+      kullanın.
+    </Callout>
+  );
+}
+
 export function IndexStep({
   state,
   logs,
@@ -49,13 +119,7 @@ export function IndexStep({
           </Callout>
         )}
 
-        {state === "failed" && (
-          <Callout tone="error" title="İndeksleme başarısız">
-            Log'un sonuna bakın. <em>“daemon could not accept this client within 30000 ms”</em>{" "}
-            hatası görüyorsanız takılı bir CBM daemon'ı vardır — aşağıdaki kurtarma düğmesini
-            kullanın.
-          </Callout>
-        )}
+        {state === "failed" && <FailureHint logs={logs} />}
 
         {state === "succeeded" && cbmUi && (
           <div className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel-soft)] px-4 py-4">

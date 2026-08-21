@@ -20,6 +20,8 @@ import { EndpointStep } from "./steps/EndpointStep";
 import { IndexStep } from "./steps/IndexStep";
 import { PrecheckStep } from "./steps/PrecheckStep";
 import { ScopeStep } from "./steps/ScopeStep";
+import { ThemeToggle } from "./components/ThemeToggle";
+import { useTheme } from "./theme";
 import { SourceStep } from "./steps/SourceStep";
 import type {
   AzdoStatus,
@@ -60,6 +62,9 @@ export default function App() {
   const [branches, setBranches] = useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  /** İndeksleme kapsamı; boş dizi = tüm repo. */
+  const [folders, setFolders] = useState<string[]>([]);
+  const [theme, setTheme] = useTheme();
 
   /** Kaynak kod yolu — kullanıcıdan istenmez, hazırlama adımında türetilir. */
   const [repoPath, setRepoPath] = useState("");
@@ -155,6 +160,8 @@ export default function App() {
     setRepo(next);
     setBranch(next.defaultBranch);
     setRepoPath("");
+    // Klasör kapsamı repoya özgü — yeni repoda sıfırlanmalı.
+    setFolders([]);
 
     // Dalları yükle — kapsam adımındaki seçici bunları gösterecek.
     setBranches([]);
@@ -210,7 +217,7 @@ export default function App() {
     setPrecheckRunning(true);
     setPrecheckError(null);
     try {
-      const result = await prepareRepo(repo.id, branch);
+      const result = await prepareRepo(repo.id, branch, folders);
       setPrecheck(result);
       // Kaynak kod yolu burada belli oluyor; sonraki adımlar bunu kullanır.
       setRepoPath(result.path);
@@ -219,7 +226,7 @@ export default function App() {
     } finally {
       setPrecheckRunning(false);
     }
-  }, [repo, branch]);
+  }, [repo, branch, folders]);
 
   const doIndex = useCallback(async (): Promise<void> => {
     if (!repo) return;
@@ -230,7 +237,7 @@ export default function App() {
     setJobState("queued");
 
     try {
-      const { jobId } = await startJob(repoPath, repo.name);
+      const { jobId } = await startJob(repoPath, repo.name, { branch });
       subscribeToJob(
         jobId,
         (event) => {
@@ -250,7 +257,7 @@ export default function App() {
       setLogs((previous) => [...previous, String(error)]);
       setJobState("failed");
     }
-  }, [repo, repoPath]);
+  }, [repo, repoPath, branch]);
 
 
   const navButtons = (
@@ -301,11 +308,14 @@ export default function App() {
             ))}
           </nav>
         </div>
-        {azdo?.org && (
-          <span className="font-mono text-xs text-gray-500">
-            {azdo.configured ? "✓" : "✕"} dev.azure.com/{azdo.org}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {azdo?.org && (
+            <span className="hidden font-mono text-xs text-gray-500 sm:inline">
+              {azdo.configured ? "✓" : "✕"} dev.azure.com/{azdo.org}
+            </span>
+          )}
+          <ThemeToggle value={theme} onChange={setTheme} />
+        </div>
       </header>
 
       {view === "catalog" ? (
@@ -348,6 +358,8 @@ export default function App() {
               branches={branches}
               branchesLoading={branchesLoading}
               branchesError={branchesError}
+              folders={folders}
+              onFoldersChange={setFolders}
               footer={navButtons("source", {
                 label:
                   repo.source === "local" ? "Ön kontrolü çalıştır" : "Kodu getir ve doğrula",

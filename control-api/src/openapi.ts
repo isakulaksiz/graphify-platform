@@ -124,9 +124,45 @@ export function openApiDocument(): unknown {
           responses: { "200": { description: "Dal listesi" } },
         },
       },
+      "/api/repos/{id}/folders": {
+        get: {
+          summary: "Bir dalın klasörleri (indeksleme kapsamı seçimi için)",
+          description:
+            "Klon varsa git'ten (dosya sayılarıyla), yoksa Azure DevOps API'sinden " +
+            "listelenir. path verilirse o klasörün altındakiler döner.",
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string" } },
+            { name: "branch", in: "query", required: true, schema: { type: "string" } },
+            { name: "path", in: "query", schema: { type: "string" } },
+          ],
+          responses: { "200": { description: "Klasör listesi" }, "400": { description: "Hata" } },
+        },
+      },
       "/api/prepare": {
         post: {
           summary: "Kaynak kodu hazırla (klonla/güncelle) ve doğrula",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["repoId", "branch"],
+                  properties: {
+                    repoId: { type: "string" },
+                    branch: { type: "string" },
+                    folders: {
+                      type: "array",
+                      items: { type: "string" },
+                      description:
+                        "İndekslenecek klasörler. Boş/verilmezse tüm repo. " +
+                        "sparse-checkout ile uygulanır: kapsam dışı dosyalar diske inmez.",
+                    },
+                  },
+                },
+              },
+            },
+          },
           responses: { "200": { description: "Hazır" }, "400": { description: "Hata" } },
         },
       },

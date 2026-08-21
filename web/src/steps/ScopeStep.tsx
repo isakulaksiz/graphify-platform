@@ -1,4 +1,5 @@
 import { BranchSelect } from "../components/BranchSelect";
+import { FolderPicker } from "../components/FolderPicker";
 import { Callout, Field, Panel } from "../components/ui";
 import type { RepoSummary } from "../types";
 
@@ -9,6 +10,8 @@ export function ScopeStep({
   branches,
   branchesLoading,
   branchesError,
+  folders,
+  onFoldersChange,
   footer,
 }: {
   repo: RepoSummary;
@@ -17,15 +20,17 @@ export function ScopeStep({
   branches: string[];
   branchesLoading: boolean;
   branchesError: string | null;
+  folders: string[];
+  onFoldersChange: (folders: string[]) => void;
   footer: React.ReactNode;
 }) {
   return (
     <Panel
       title="Kapsam"
-      description="Hangi dalın grafı çıkarılacak."
+      description="Hangi dalın ve hangi klasörlerin grafı çıkarılacak."
       footer={footer}
     >
-      <div className="max-w-xl space-y-5">
+      <div className="max-w-2xl space-y-5">
         <div className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-panel-soft)] px-4 py-3">
           <p className="text-xs uppercase tracking-wide text-gray-500">Seçilen repo</p>
           <p className="mt-1 font-medium text-gray-100">{repo.name}</p>
@@ -44,6 +49,43 @@ export function ScopeStep({
             defaultBranch={repo.defaultBranch}
           />
         </Field>
+
+        {repo.source === "local" ? (
+          <Callout tone="info" title="Klasör kapsamı yerel repolarda kullanılamaz">
+            Kapsamı daraltmak çalışma kopyanızdan dosya kaldırmak anlamına gelirdi.
+            Azure DevOps üzerinden seçilen repolarda platform kendi klonunu açtığı için
+            bu güvenle yapılabiliyor.
+          </Callout>
+        ) : (
+          <Field
+            label="Klasörler"
+            hint="Seçim yapmazsanız tüm repo indekslenir. Üst klasörü seçmek altındakileri de kapsar."
+          >
+            <FolderPicker
+              repoId={repo.id}
+              branch={branch}
+              selected={folders}
+              onChange={onFoldersChange}
+              disabled={!branch}
+            />
+          </Field>
+        )}
+
+        {folders.length > 0 && (
+          <Callout tone="info" title="Kapsam dışı dosyalar diske hiç inmiyor">
+            <p>
+              CBM'in indeksleme aracı klasör filtresi almıyor, dolayısıyla kapsamı git
+              tarafında uyguluyoruz: <code>sparse-checkout</code> ile yalnızca seçtiğiniz
+              klasörler çalışma kopyasına yazılıyor. İndirilmeyen dosya için ne ayrıştırma
+              ne LSP çözümlemesi yapılıyor — kazanç buradan geliyor.
+            </p>
+            <p className="mt-2">
+              Seçilen klasörler arasındaki çağrı ve veri akışı ilişkileri korunur; kapsam
+              dışında kalan klasörlere giden bağlantılar grafta görünmez. Repo kökündeki
+              dosyalar (README, derleme yapılandırmaları) her zaman dahil edilir.
+            </p>
+          </Callout>
+        )}
 
         <Callout tone="info" title="Kaynak kodu platform kendisi getirir">
           {repo.source === "local" ? (

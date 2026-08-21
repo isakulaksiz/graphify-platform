@@ -38,6 +38,8 @@ export interface IndexRecord {
   /** İndekslemede kullanılan dal. Otomatik güncelleme bunu izler. */
   branch: string;
   repoId?: string;
+  /** Uygulanan klasör kapsamı; boş/eksik = tüm repo. */
+  folders?: string[];
   /** İndekslemenin yapıldığı commit. */
   sha?: string;
   indexedAt: string;
@@ -96,6 +98,7 @@ export function recordIndex(input: {
   repoName: string;
   branch: string;
   repoId?: string;
+  folders?: string[];
   sha?: string;
 }): IndexRecord {
   load();
@@ -108,6 +111,7 @@ export function recordIndex(input: {
     repoName: input.repoName,
     branch: input.branch,
     repoId: input.repoId ?? previous?.repoId,
+    folders: input.folders ?? previous?.folders ?? [],
     sha: input.sha ?? previous?.sha,
     indexedAt: new Date().toISOString(),
     autoUpdate: previous?.autoUpdate ?? false,
@@ -136,4 +140,24 @@ export function forgetRecord(repoPath: string): void {
 
 export function stateFilePath(): string {
   return STATE_FILE;
+}
+
+/**
+ * Kaynak kodu artık diskte olmayan kayıtları atar.
+ *
+ * Kayıt yalnızca graf CBM'den silinirken temizleniyordu; klon elle kaldırılmış
+ * ya da graf başka bir yoldan yok olmuşsa kayıt sonsuza kadar kalıyor ve
+ * açılışta "yol yok" uyarısı üretiyordu. Açılışta bir kez süpürmek yeterli.
+ */
+export function pruneMissing(): number {
+  load();
+  let removed = 0;
+  for (const [key, record] of records) {
+    if (existsSync(record.repoPath)) continue;
+    records.delete(key);
+    removed += 1;
+    console.info(`[state] kayıt atıldı, kaynak kod yok: ${record.repoName} (${record.repoPath})`);
+  }
+  if (removed > 0) persist();
+  return removed;
 }

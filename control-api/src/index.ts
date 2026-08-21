@@ -1,24 +1,29 @@
 import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import express, { type Request, type Response } from "express";
 import {
   azdoStatus,
   clearCredentials,
   listBranches,
+  listFolderItems,
   listRepos,
   setCredentials,
 } from "./azdo.js";
 import {
+  CLONE_ROOT,
   clonePathFor,
   currentBranch,
   displayName,
   lastCommit,
+  listFolders,
   localBranches,
   prepareRepo,
+  readScope,
+  scopeLabel,
 } from "./clone.js";
 import { deleteProject, listProjects, recoverDaemon } from "./cbm.js";
-import { createJob, getJob } from "./jobs.js";
-import { forgetRecord, getRecord, recordIndex, stateFilePath } from "./state.js";
+import { cancelJobsForProject, createJob, getJob, hasActiveJobs } from "./jobs.js";
+import { forgetRecord, getRecord, pruneMissing, recordIndex, stateFilePath } from "./state.js";
 import type { EndpointInfo, RepoSummary } from "./types.js";
 import {
   getWatch,
@@ -51,6 +56,26 @@ const GATEWAY_INTERNAL = (process.env.GATEWAY_INTERNAL_URL ?? GATEWAY_BASE).repl
 const CBM_UI_URL = (process.env.CBM_UI_URL ?? "http://localhost:9749").replace(/\/$/, "");
 /** Yerel repoların aranacağı kök dizinler (virgülle ayrılmış). */
 const LOCAL_ROOTS = (process.env.LOCAL_REPO_ROOTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+/**
+ * İndekslemeye izin verilen kökler.
+ *
+ * `/api/jobs` ve `/api/watch` uçları kaynak kod yolunu istekten alıyor ve
+ * doğrulama yalnızca "bu dizin var mı" kontrolüydü. Sonuç: konteynerdeki
+ * HERHANGİ bir dizin indekslenip MCP üzerinden yayınlanabiliyordu
+ * (`/usr/local/lib/node_modules` ile doğrulandı, 202 döndü).
+ *
+ * `CBM_ALLOWED_ROOT` yalnızca gateway servisinde tanımlıydı; indekslemeyi
+ * çalıştıran servis control-api olduğu için orada hiçbir sınır yoktu.
+ * Sınırı burada uyguluyoruz: hem klon kökü hem de operatörün açıkça izin
+ * verdiği yerel repo kökleri kapsanıyor.
+ */
+const ALLOWED_ROOTS = [CLONE_ROOT, ...LOCAL_ROOTS.map((root) => resolve(root))];
+
+function isAllowedRepoPath(candidate: string): boolean {
+  const path = resolve(candidate);
+  return ALLOWED_ROOTS.some((root) => path === root || path.startsWith(`${root}${sep}`));
+}
 
 const app = express();
 app.use(express.json());
@@ -179,13 +204,39 @@ app.get("/api/repos", async (_req: Request, res: Response) => {
   try {
     const [repos, indexed] = await Promise.all([allRepos(), listProjects().catch(() => [])]);
 
-    // Daha önce indekslenmiş repoları işaretle — arayüz "yeniden indeksle" diyebilsin.
+    /**
+     * İndekslenmiş grafları repolara eşle.
+     *
+     * Tam yol eşitliği YETMEZ: klasör kapsamı kullanıldığında klon yolunun
+     * sonuna kapsam anahtarı ekleniyor (`...-2b08ec87-services-3e7aaa`).
+     * Kapsamsız yolu arayan eski eşleştirme, kapsamla indekslenmiş bir repoyu
+     * "hiç indekslenmemiş" gösteriyordu.
+     *
+     * Bir repo birden çok kapsamla indekslenmiş olabilir, o yüzden liste.
+     */
     for (const repo of repos) {
-      const clonePath = repo.source === "local" ? repo.localPath : clonePathFor(repo);
-      const match = indexed.find(
-        (p) => (clonePath && p.rootPath === clonePath) || p.name === repo.name,
+      const base = repo.source === "local" ? repo.localPath : clonePathFor(repo);
+      if (!base) continue;
+
+      const matches = indexed.filter(
+        (p) => p.rootPath === base || p.rootPath.startsWith(`${base}-`),
       );
-      if (match) repo.indexedAs = match.name;
+      if (matches.length === 0) continue;
+
+      repo.indexed = await Promise.all(
+        matches.map(async (p) => ({
+          project: p.name,
+          rootPath: p.rootPath,
+          folders: getRecord(p.rootPath)?.folders?.length
+            ? (getRecord(p.rootPath)?.folders ?? [])
+            : await readScope(p.rootPath).catch(() => []),
+          nodes: p.nodes,
+          edges: p.edges,
+        })),
+      );
+      // Kapsamsız olan (tüm repo) varsa onu başa al — en genel kayıt o.
+      repo.indexed.sort((a, b) => a.folders.length - b.folders.length);
+      repo.indexedAs = repo.indexed[0]?.project;
     }
 
     res.json({ repos, azdo: azdoStatus() });
@@ -254,22 +305,59 @@ app.get("/api/cbm-ui", async (req: Request, res: Response) => {
  */
 app.get("/api/catalog", async (_req: Request, res: Response) => {
   try {
-    const [projects, health] = await Promise.all([listProjects(), gatewayHealth()]);
+    const [projects, health, repos] = await Promise.all([
+      listProjects(),
+      gatewayHealth(),
+      allRepos().catch(() => [] as RepoSummary[]),
+    ]);
     const authMode = health?.authMode === "none" ? "none" : "bearer";
     const watches = listWatches();
 
     const entries = await Promise.all(projects.map(async (p) => {
       const watch = watches.find((w) => w.repoPath === p.rootPath);
-      const commit = await lastCommit(p.rootPath).catch(() => null);
       // Dal sırayla: indeksleme kaydı → CBM → çalışma kopyasının hâli.
       const record = getRecord(p.rootPath);
       const branch = record?.branch ?? p.branch ?? (await currentBranch(p.rootPath).catch(() => null));
+      const folders =
+        record?.folders && record.folders.length > 0
+          ? record.folders
+          : await readScope(p.rootPath).catch(() => []);
+      // Kapsamlı projede reponun tepe commit'i değil, kapsama dokunan son commit.
+      const commit = await lastCommit(p.rootPath, folders).catch(() => null);
+
+      /**
+       * Okunabilir ad — yol ayrıştırmak son çare.
+       *
+       * Sıra: kalıcı kayıt → canlı repo listesi → dizin adından türetme.
+       * Kayıt önce geliyor çünkü katalog sayfası PAT girilmeden de açılıyor
+       * (geliştiricilerle paylaşılan ekran bu); o durumda repo listesi boş.
+       */
+      const owner = repos.find((repo) => {
+        const base = repo.source === "local" ? repo.localPath : clonePathFor(repo);
+        return Boolean(base) && (p.rootPath === base || p.rootPath.startsWith(`${base}-`));
+      });
+      const repoName = record?.repoName ?? owner?.name ?? displayName(p.rootPath);
+
+      // Kaydı yoksa doldur: bir sonraki açılışta repo listesine ihtiyaç kalmasın.
+      if (!record && owner) {
+        recordIndex({
+          repoPath: p.rootPath,
+          repoName: owner.name,
+          branch: branch ?? owner.defaultBranch,
+          repoId: owner.id,
+          folders,
+        });
+      }
+
+      const scope = scopeLabel(folders);
       return {
         project: p.name,
-        displayName: displayName(p.rootPath),
+        displayName: scope ? `${repoName} · ${scope}` : repoName,
+        repoName,
         lastCommit: commit,
         rootPath: p.rootPath,
         branch: branch ?? undefined,
+        folders,
         indexedAt: record?.indexedAt,
         nodes: p.nodes,
         edges: p.edges,
@@ -278,7 +366,14 @@ app.get("/api/catalog", async (_req: Request, res: Response) => {
         sseUrl: `${GATEWAY_BASE}/mcp/${p.name}/sse`,
         graphUrl: `${CBM_UI_URL}/?tab=graph&project=${encodeURIComponent(p.name)}`,
         autoUpdate: watch
-          ? { enabled: true, branch: watch.branch, lastSha: watch.lastSha, lastTrigger: watch.lastTrigger }
+          ? {
+              enabled: true,
+              branch: watch.branch,
+              lastSha: watch.lastSha,
+              lastTrigger: watch.lastTrigger,
+              // Grafın gerçekten yenilendiğini gösteren tek bilgi bu.
+              lastIndex: watch.lastIndex,
+            }
           : { enabled: false },
       };
     }));
@@ -319,13 +414,48 @@ app.delete("/api/projects/:name", async (req: Request, res: Response) => {
       : listWatches().find((w) => w.repoName === project);
 
     if (watch) stopWatch(watch.repoPath);
+
+    /**
+     * Süren indekslemeyi iptal et.
+     *
+     * CBM proje bazlı kilit tutuyor: indeksleme sürerken silme
+     * "project operation cancelled or blocked by an active index" ile
+     * reddediliyor. Kullanıcı silmek istediğine göre o indekslemeyi
+     * sürdürmenin anlamı da yok.
+     */
+    const cancelled = cancelJobsForProject(project);
+    if (cancelled) {
+      // SIGTERM'in işlenip kilidin bırakılması için kısa bir pay.
+      await new Promise((done) => setTimeout(done, 1500));
+    }
+
     if (rootPath) forgetRecord(rootPath);
 
-    await deleteProject(project);
-    console.info(`[katalog] proje silindi: ${project}${watch ? " (izleme de durduruldu)" : ""}`);
-    res.json({ deleted: project, watchStopped: Boolean(watch) });
+    // Çalışan iş varken daemon kurtarma yapılmaz — o işi de öldürürdü.
+    const result = await deleteProject(project, { allowRecovery: !hasActiveJobs() });
+    console.info(
+      `[katalog] proje silindi: ${project} (${result.status})` +
+        `${watch ? " — izleme de durduruldu" : ""}${result.recovered ? " — daemon temizlendi" : ""}`,
+    );
+    res.json({
+      deleted: project,
+      status: result.status,
+      recovered: result.recovered,
+      watchStopped: Boolean(watch),
+      indexCancelled: cancelled,
+    });
   } catch (error) {
-    res.status(500).json({ error: String(error instanceof Error ? error.message : error) });
+    const message = String(error instanceof Error ? error.message : error);
+    // Kilit çatışması sunucu hatası değil: 409 ile ayırıyoruz ki arayüz
+    // "tekrar deneyin" diyebilsin.
+    const blocked = /blocked by an active index|operation cancelled/i.test(message);
+    res.status(blocked ? 409 : 500).json({
+      error: blocked
+        ? "Graf şu anda indeksleme kilidi altında olduğu için silinemedi. " +
+          `Birkaç saniye sonra tekrar deneyin. (CBM: ${message})`
+        : message,
+      retryable: blocked,
+    });
   }
 });
 
@@ -343,9 +473,58 @@ app.get("/api/projects", async (_req: Request, res: Response) => {
  * Azure DevOps repolarında klonlar/fetch eder — kullanıcıdan yol istenmez.
  * Kaynak kod yolu bu adımda türetilir ve sonraki adımlara aktarılır.
  */
+/**
+ * Bir dalın klasörlerini listeler — indeksleme kapsamı seçimi için.
+ *
+ * Kaynak sırası: yerel klon (dosya sayısı da verir) → Azure DevOps API
+ * (klon gerektirmez, ama sayım vermez). Büyük repoda klasör seçebilmek için
+ * tam klonu beklemek gerekmiyor.
+ */
+app.get("/api/repos/:id/folders", async (req: Request, res: Response) => {
+  const branch = typeof req.query.branch === "string" ? req.query.branch : "";
+  const path = typeof req.query.path === "string" ? req.query.path : "";
+
+  const repo = await findRepo(String(req.params.id));
+  if (!repo) {
+    res.status(404).json({ error: "Repo bulunamadı." });
+    return;
+  }
+  if (!branch) {
+    res.status(400).json({ error: "branch zorunlu." });
+    return;
+  }
+
+  try {
+    const local = repo.source === "local" ? repo.localPath : clonePathFor(repo);
+    if (local && existsSync(resolve(local, ".git"))) {
+      res.json({ folders: await listFolders(local, branch, path), source: "git", counts: true });
+      return;
+    }
+
+    const names = await listFolderItems(repo.id, branch, path);
+    res.json({
+      folders: names.map((folder) => ({
+        path: folder,
+        name: folder.split("/").at(-1) ?? folder,
+        // API tek seviye döndüğü için alt klasör ve sayım bilinmiyor;
+        // arayüz yine de açmayı denesin.
+        hasChildren: true,
+        fileCount: -1,
+      })),
+      source: "azure-devops",
+      counts: false,
+    });
+  } catch (error) {
+    res.status(400).json({ error: String(error instanceof Error ? error.message : error) });
+  }
+});
+
 app.post("/api/prepare", async (req: Request, res: Response) => {
   const repoId = typeof req.body?.repoId === "string" ? req.body.repoId : "";
   const branch = typeof req.body?.branch === "string" ? req.body.branch : "";
+  const folders = Array.isArray(req.body?.folders)
+    ? (req.body.folders as unknown[]).filter((f): f is string => typeof f === "string")
+    : [];
 
   if (!repoId || !branch) {
     res.status(400).json({ error: "repoId ve branch zorunlu." });
@@ -360,16 +539,17 @@ app.post("/api/prepare", async (req: Request, res: Response) => {
 
   const logs: string[] = [];
   try {
-    const prepared = await prepareRepo(repo, branch, (line) => logs.push(line));
+    const prepared = await prepareRepo(repo, branch, folders, (line) => logs.push(line));
     const path = prepared.repoPath;
 
-    // Seçilen dalı burada kalıcı hale getiriyoruz: indeksleme ve otomatik
-    // güncelleme bundan sonra bu dalı esas alır.
+    // Seçilen dal ve klasör kapsamını burada kalıcı hale getiriyoruz:
+    // indeksleme ve otomatik güncelleme bundan sonra bunları esas alır.
     recordIndex({
       repoPath: path,
       repoName: repo.name,
       branch,
       repoId: repo.id,
+      folders: prepared.folders,
       sha: prepared.sha,
     });
 
@@ -387,6 +567,8 @@ app.post("/api/prepare", async (req: Request, res: Response) => {
       path,
       action: prepared.action,
       sha: prepared.sha,
+      folders: prepared.folders,
+      fileCount: prepared.fileCount,
       logs,
       checks,
       ready: checks.every((c) => c.ok),
@@ -406,7 +588,17 @@ app.post("/api/jobs", (req: Request, res: Response) => {
     res.status(400).json({ error: "Geçerli bir repoPath gerekli." });
     return;
   }
+  if (!isAllowedRepoPath(repoPath)) {
+    res.status(400).json({
+      error:
+        "Bu yol indekslenemez. Yalnızca platformun kendi klon kökü ve " +
+        "LOCAL_REPO_ROOTS ile açıkça izin verilen dizinler indekslenebilir.",
+    });
+    return;
+  }
+
   const path = resolve(repoPath);
+
   // Doğrudan bu uca gelen çağrılarda da dal kaydı düşülsün.
   const branch =
     (typeof req.body?.branch === "string" && req.body.branch) || getRecord(path)?.branch;
@@ -536,6 +728,10 @@ app.post("/api/watch", async (req: Request, res: Response) => {
     res.status(400).json({ error: "Geçerli bir repoPath gerekli." });
     return;
   }
+  if (!isAllowedRepoPath(repoPath)) {
+    res.status(400).json({ error: "Bu yol izlenemez — izin verilen kökler dışında." });
+    return;
+  }
 
   const path = resolve(repoPath);
   /**
@@ -553,6 +749,14 @@ app.post("/api/watch", async (req: Request, res: Response) => {
       error: "İzlenecek dal belirlenemedi. Önce hazırlık adımını çalıştırın veya branch gönderin.",
     });
     return;
+  }
+
+  // Kapsam kayıtta yoksa klondan oku: izleme yanlış kapsamla çalışmasın.
+  if ((getRecord(path)?.folders ?? []).length === 0) {
+    const applied = await readScope(path).catch(() => []);
+    if (applied.length > 0) {
+      recordIndex({ repoPath: path, repoName, branch, folders: applied });
+    }
   }
 
   res.json(startWatch(path, repoName, branch));
@@ -624,7 +828,8 @@ app.listen(PORT, () => {
   console.info(`[control-api] azure devops: ${JSON.stringify(azdoStatus())}`);
   console.info(`[control-api] durum dosyası: ${stateFilePath()}`);
 
-  // Açık bırakılmış izlemeleri geri kur — yeniden başlatma otomatik
-  // güncellemeyi sessizce kapatmasın.
+  // Kaynak kodu kalmamış kayıtları at, sonra açık izlemeleri geri kur —
+  // yeniden başlatma otomatik güncellemeyi sessizce kapatmasın.
+  pruneMissing();
   restoreWatches();
 });

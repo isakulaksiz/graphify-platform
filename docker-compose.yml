@@ -22,9 +22,26 @@ services:
       # GATEWAY_TOKENS tanımlayın — kod değişikliği gerekmez.
       GATEWAY_AUTH: "${GATEWAY_AUTH:-none}"
       GATEWAY_TOKENS: "${GATEWAY_TOKENS:-}"
-      # Container'da cgroup limitleri yanlış okunuyor; elle veriyoruz.
-      CBM_WORKERS: "${CBM_WORKERS:-4}"
-      CBM_MEM_BUDGET_MB: "${CBM_MEM_BUDGET_MB:-2048}"
+      # BELLEK — sabit değer YAZMAYIN.
+      #
+      # CBM bütçeyi worker sayısına bölüyor:
+      #   memory_budget_bytes / physical_job_limit = worker_memory_budget_bytes
+      # Sabit 2048 verildiğinde 4 worker'a 512 MB düşüyordu ve büyük repoda
+      # worker SIGKILL (signal=9) ile ölüyordu — 18 dakika sonra, sonuç yok.
+      #
+      # Değer verilmezse CBM RAM'in ~%25'ini kendisi seçer
+      # (log: source=ram_fraction). 32 GB'lık makinede ~8 GB, worker başına
+      # ~2 GB. Aşağıdaki satır host'ta tanımlıysa geçirir, tanımlı değilse
+      # değişkeni HİÇ set etmez.
+      CBM_MEM_BUDGET_MB:
+      # Çok büyük tek dosyalar (üretilmiş kod) bir worker'ı tek başına
+      # şişirebiliyor; gerekirse sınır koyun. Örn: CBM_MAX_FILE_BYTES=2000000
+      CBM_MAX_FILE_BYTES:
+      # Worker ölürse kaç kez yeniden denensin.
+      CBM_INDEX_MAX_RESTARTS:
+      # Tek iş parçacığı: tüm bütçe tek worker'a gider. Bellek darboğazında
+      # paralellikten vazgeçip bitirmek daha iyi olabilir.
+      CBM_INDEX_SINGLE_THREAD:
       # İndeklemeyi klon köküne hapseder — çok kiracılı kurulumda şart.
       CBM_ALLOWED_ROOT: /data/repos
     ports:
@@ -67,6 +84,10 @@ services:
       dockerfile: Dockerfile
     image: graphify/platform:latest
     command: ["node", "control-api/dist/index.js"]
+    # CBM CLI kendi daemon'ını başlatıyor; CLI çıkınca daemon yetim kalıp PID 1'e
+    # bağlanıyor. Node PID 1 olarak yetimleri toplamadığı için <defunct> zombiler
+    # birikiyordu (ölçüldü: 12 dakikada 6 tane). tini bunları topluyor.
+    init: true
     environment:
       PORT: "8090"
       # Kullanıcının tarayıcısına gösterilen adresler:
@@ -88,8 +109,12 @@ services:
       # "unable to verify the first certificate" der. CA paketini bağlayın:
       #   ./certs/kurum-ca.crt  →  /certs/ca.crt
       NODE_EXTRA_CA_CERTS: "${NODE_EXTRA_CA_CERTS:-}"
-      CBM_WORKERS: "${CBM_WORKERS:-4}"
-      CBM_MEM_BUDGET_MB: "${CBM_MEM_BUDGET_MB:-2048}"
+      # Bellek ayarları için gateway servisindeki açıklamaya bakın —
+      # indekslemeyi asıl çalıştıran bu servis.
+      CBM_MEM_BUDGET_MB:
+      CBM_MAX_FILE_BYTES:
+      CBM_INDEX_MAX_RESTARTS:
+      CBM_INDEX_SINGLE_THREAD:
     volumes:
       - cbm-data:/data/cbm
       - repos:/data/repos

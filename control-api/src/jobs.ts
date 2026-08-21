@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { indexRepository, invalidateProjectCache } from "./cbm.js";
+import { cbmProjectName } from "./clone.js";
 import type { IndexResult, JobEvent, JobState } from "./types.js";
 
 interface Job {
@@ -84,6 +85,48 @@ async function run(job: Job): Promise<void> {
 
 export function getJob(id: string): Job | undefined {
   return jobs.get(id);
+}
+
+/**
+ * Süren indekslemeyi CBM proje adına göre iptal eder.
+ *
+ * Grafı silmek isteyen kullanıcı için gerekli: CBM proje bazlı kilit tutuyor
+ * ve indeksleme sürerken silmeyi
+ * "project operation cancelled or blocked by an active index" ile reddediyor.
+ * Silinecek bir grafın indekslemesini sürdürmenin de anlamı yok.
+ *
+ * Yol üzerinden eşleştirme yetmiyor: silme isteği geldiğinde proje CBM'e
+ * henüz kaydolmamış olabiliyor (indekslemenin ilk saniyeleri) ve
+ * `list_projects` onu döndürmediği için kök yolu bilemiyoruz. Adı yoldan
+ * ileri yönde hesaplayıp karşılaştırmak bu boşluğu kapatıyor.
+ */
+export function cancelJobsForProject(project: string): boolean {
+  for (const [path, id] of activeByPath) {
+    if (cbmProjectName(path) !== project) continue;
+
+    const job = jobs.get(id);
+    if (!job || (job.state !== "queued" && job.state !== "running")) continue;
+
+    job.cancel?.();
+    console.info(`[jobs] indeksleme iptal edildi (silme isteği): ${project}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Şu an çalışan indeksleme var mı.
+ *
+ * Daemon kurtarma `pkill -f codebase-memory-mcp` çalıştırıyor; süren bir
+ * indekslemeyi de öldürür. Kurtarmayı otomatik tetikleyen yollar bunu
+ * kontrol etmek zorunda.
+ */
+export function hasActiveJobs(): boolean {
+  for (const id of activeByPath.values()) {
+    const job = jobs.get(id);
+    if (job && (job.state === "queued" || job.state === "running")) return true;
+  }
+  return false;
 }
 
 export type { Job };
